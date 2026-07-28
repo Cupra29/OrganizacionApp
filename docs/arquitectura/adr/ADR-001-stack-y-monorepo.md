@@ -12,9 +12,9 @@ Proyecto greenfield sin restricciones heredadas. Las fuerzas relevantes:
 - Los tipos del dominio son complejos y **se comparten** entre motor, API e interfaz. Una
   divergencia entre ellos sería una fuente constante de bugs.
 - **Una sola persona construye el proyecto, sin plazo externo** (confirmado el 2026-07-27 al
-  resolverse Q12). Cada tecnología añadida se paga en atención, no solo en configuración.
-  **La disponibilidad de horas sigue sin confirmarse y no se asume en ninguna dirección**;
-  ver la revisión de la §5.
+  resolverse Q12), con una disponibilidad de **10–20 h semanales** (confirmada el
+  2026-07-28). Cada tecnología añadida se paga en atención, no solo en configuración. Ver la
+  revisión de la §5.
 - No hay requisitos de rendimiento numérico: el algoritmo es combinatorio ligero sobre
   decenas de bloques, no cálculo intensivo.
 
@@ -108,11 +108,12 @@ la decisión se reexaminó en lugar de ratificarse por inercia.
    calendario sondean con agresividad). Es manejable, pero es fricción en el punto exacto
    donde no la quiero.
 
-**Sobre la disponibilidad de horas, que sigue sin confirmarse:** no se asume en ninguna
-dirección, y esta decisión es robusta en ambos escenarios. Si la disponibilidad resultara
-ser muy baja, **la palanca correcta no sería cambiar de framework —que ahorra días— sino
-recortar variantes del alcance, que ahorra semanas** ([ADR-009]). Next.js no es la respuesta
-a "tengo poco tiempo" en este proyecto.
+**Sobre la disponibilidad de horas — confirmada el 2026-07-28 en 10–20 h semanales.** Es la
+franja para la que el plan de fases está dimensionado, así que ni esta decisión ni el alcance
+de [ADR-009] cambian. El razonamiento se conserva porque sigue siendo válido si la
+disponibilidad real cayera: **la palanca correcta no sería cambiar de framework —que ahorra
+días— sino recortar variantes del alcance, que ahorra semanas** ([ADR-009]). Next.js no es la
+respuesta a "tengo poco tiempo" en este proyecto.
 
 **Sigue siendo reversible.** Migrar el shell HTTP no tocaría el motor. Se revisaría si
 aparecen requisitos de SEO en páginas públicas, o si el coste de operar dos artefactos

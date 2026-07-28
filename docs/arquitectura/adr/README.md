@@ -39,3 +39,4 @@ cambio de narrativas afecta a datos ya escritos, por eso se decidió antes de la
 | 2026-07-28 | ✅ **Ninguna pregunta abierta. La fase 0 puede arrancar.** |
 | 2026-07-28 | Los 15 ADRs pasan de `propuesto` a **`aceptado`**. A partir de aquí ninguno se edita: se supera con otro. |
 | 2026-07-28 | Convenciones de [07](../07-convenciones-propuestas.md) aplicadas al `CLAUDE.md` de la raíz. Repositorio git inicializado. |
+| 2026-07-28 | **Disponibilidad confirmada en 10–20 h semanales**, último dato de entrada que quedaba sin confirmar. Cae dentro de la franja para la que el plan está dimensionado: ADR-001 y ADR-009 se mantienen sin cambios. Nota fechada en ADR-001 en vez de ADR de reemplazo, porque ninguna decisión cambia. |

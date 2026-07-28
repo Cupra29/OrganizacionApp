@@ -358,8 +358,10 @@ replanifican al volver.
 
 ## Q12 — ¿Cuántas personas van a construir esto, y hay plazo objetivo? ✅ Resuelta
 
-> **Respuesta (2026-07-27): una persona, sin plazo externo.** La **disponibilidad de horas
-> sigue sin confirmarse y no se asume en ninguna dirección.**
+> **Respuesta (2026-07-27): una persona, sin plazo externo.** La disponibilidad de horas
+> quedó pendiente en su momento y se **confirmó el 2026-07-28 en 10–20 h semanales**, que es
+> la franja para la que el plan de fases está dimensionado: ni ADR-001 ni el alcance de
+> ADR-009 cambian.
 >
 > **ADR-001 se reexaminó de verdad, no se ratificó por inercia** — el antecedente del
 > argumento a favor de Next.js ("menos piezas para quien trabaja solo") acababa de
@@ -371,9 +373,10 @@ replanifican al volver.
 > modelo de caché de Next.js es un impuesto justo donde hay requisitos precisos de cabeceras
 > para los feeds `.ics`. Ver [ADR-001] §5.
 >
-> **Sobre la disponibilidad no confirmada:** la decisión es robusta en ambos escenarios. Si
-> resultara ser muy baja, la palanca correcta no sería cambiar de framework (ahorra días)
-> sino recortar variantes del alcance (ahorra semanas).
+> **Sobre la disponibilidad:** la decisión se tomó siendo robusta en ambos escenarios, y al
+> confirmarse en 10–20 h semanales no requirió revisión. Si en la práctica cayera, la palanca
+> correcta no sería cambiar de framework (ahorra días) sino recortar variantes del alcance
+> (ahorra semanas).
 >
 > **Efecto en el plan de fases:** el orden se mantiene y queda reforzado —sin plazo, el único
 > argumento para alterarlo (necesitar demo temprana) desaparece. Pero el riesgo cambia de
