@@ -1,0 +1,33 @@
+# Dependencias
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+
+# Entorno — nunca versionar secretos ni datos personales
+.env
+.env.*
+!.env.example
+
+# Tests
+coverage/
+
+# Caches
+.turbo/
+.cache/
+
+# Memoria de agentes — estado derivado, la fuente de verdad está en docs/arquitectura/
+.claude/agent-memory/
+
+# Editor / SO
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
