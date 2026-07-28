@@ -99,24 +99,22 @@ motivacional, ni rellenar cada minuto disponible del día.
 
 ## Enrutamiento de agentes
 
-- Diseño, ADRs y planes: agente `arquitecto`. Escribe solo en `docs/`, nunca código de
-  producción.
-- Implementación: sesión principal o agente de desarrollo, guiada por
-  `docs/arquitectura/05-plan-de-implementacion.md`.
+Este proyecto define sus agentes en `.claude/agents/`, que **tienen precedencia sobre los
+globales de `~/.claude/agents/`**. Usa siempre los locales: los globales asumen NestJS +
+Prisma y rutas de documentación que aquí no existen.
+
+| Agente | Carril | Modelo |
+|---|---|---|
+| `arquitecto` | Diseño, ADRs y planes. Escribe solo en `docs/` | opus |
+| `engine-dev` | `packages/*` — motor, temporal, dominio, ical, contracts. Funciones puras | opus |
+| `backend-dev` | `apps/api` — Fastify + Drizzle | sonnet |
+| `frontend-dev` | `apps/web` — React + Vite | sonnet |
+| `db-architect` | Esquema y migraciones Drizzle. **El único que toca el esquema** | sonnet |
+| `qa-engineer` | Criterios de aceptación y casos de prueba en `docs/qa/` | sonnet |
+| `test-runner` | Ejecuta verificaciones y reporta. No corrige | sonnet |
+| `security-reviewer` | Revisa y reporta. No modifica nada | sonnet |
+
+- **Ningún agente de implementación cruza a otro carril.** Si necesita un cambio fuera del
+  suyo, lo describe y lo pasa a quien corresponde.
+- La implementación se guía por `docs/arquitectura/05-plan-de-implementacion.md`.
 - Ante una decisión no cubierta por un ADR: parar y consultar, no improvisar.
-
-### Correcciones obligatorias a los agentes globales
-
-Los agentes de `~/.claude/agents/` traen defaults que **no aplican aquí**. Este archivo
-manda sobre ellos:
-
-- **`backend-dev`** asume «NestJS + Prisma» y busca los ADRs en `docs/adr/`. En este
-  proyecto son **Fastify + Drizzle**, y los ADRs están en **`docs/arquitectura/adr/`**.
-  Su patrón «controlador → servicio → repositorio» aplica solo a `apps/api`, nunca a
-  `packages/engine`, que es una función pura sin capas.
-- **`db-architect`** asume Prisma y busca `prisma/schema.prisma` y `prisma/migrations/`.
-  Aquí el esquema es **Drizzle**; las migraciones se generan con `pnpm db:generate`.
-  Drizzle se eligió *sobre* Prisma por los tipos de rango (`tstzrange`), que son los que
-  hacen imposible persistir solapes: no los sustituyas por columnas sueltas.
-- **`security-reviewer`** parte de `git diff` contra la rama base. Válido a partir del
-  primer commit.
