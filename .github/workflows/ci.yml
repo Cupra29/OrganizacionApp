@@ -24,7 +24,7 @@ jobs:
     # secretos de despliegue o el disparador `pull_request`, el mismo vector pasa a
     # ser de impacto alto.
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Ningún paso de este job hace push; sin esto el GITHUB_TOKEN queda
           # persistido en .git/config del runner el resto del job.
