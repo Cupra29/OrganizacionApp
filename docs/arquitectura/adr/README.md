@@ -21,6 +21,7 @@ Un ADR aceptado **no se edita**: se reemplaza por otro que lo supere.
 | [014](./ADR-014-cumplimiento-rgpd.md) | RGPD como techo; narrativas estructuradas, no texto redactado | aceptado | Parcialmente |
 | [015](./ADR-015-parametros-de-calibracion.md) | Fricción conservadora (15 % + 7 min) y corrección del tope emergente | aceptado | Sí |
 | [016](./ADR-016-version-de-typescript.md) | TypeScript 6.0, no el compilador nativo 7.0, hasta que exista la API programática | aceptado | Sí |
+| [017](./ADR-017-determinismo-del-ics.md) | El `.ics` es función de la versión del plan; `packages/ical` no lee el reloj | aceptado | Sí |
 
 Los cinco marcados como no reversibles (003, 005, 006, 011, 013) son puertas de una sola
 dirección: cambiarlos después implica migración destructiva o reescritura del núcleo. Son los
@@ -43,3 +44,4 @@ cambio de narrativas afecta a datos ya escritos, por eso se decidió antes de la
 | 2026-07-28 | **Disponibilidad confirmada en 10–20 h semanales**, último dato de entrada que quedaba sin confirmar. Cae dentro de la franja para la que el plan está dimensionado: ADR-001 y ADR-009 se mantienen sin cambios. Nota fechada en ADR-001 en vez de ADR de reemplazo, porque ninguna decisión cambia. |
 | 2026-07-29 | Nace **ADR-016** al ejecutar la fase 0: TypeScript 7.0 salió estable sin API programática y `dependency-cruiser` no lo soporta. Concreta la versión que ADR-001 dejaba abierta; no lo contradice. |
 | 2026-07-29 | Cerrados los cuatro cabos de la fase 0. **Licencia MIT** declarada. `web-solo-contracts` y `apps-no-se-cruzan` **demostradas** (no hacía falta esperar a la fase 7). El disparador de ADR-016 pasa de nota a **workflow mensual** que comprueba sus dos condiciones. **Dependabot** para `github-actions`, que cierra el hueco abierto al anclar las acciones por SHA. Solo queda diferido `pull_request`, condicionado a que haya colaboradores. |
+| 2026-07-29 | Entregada la primera parte de la fase 1, el **guardrail de reloj y aleatoriedad**. Nace **ADR-017**: `packages/ical` entra en su alcance porque el `.ics` de una versión debe ser reproducible byte a byte. **Ningún ADR queda reemplazado** — ninguno hablaba de `DTSTAMP`; es una concreción, como lo fue ADR-016. Corrige además la afirmación que motivó la revisión: un `DTSTAMP` cambiante **no** duplica eventos, la deduplicación es por `UID`. El [05](../05-plan-de-implementacion.md) se corrige en el mismo movimiento: nombraba `noRestrictedGlobals`, que es incapaz de la precisión que el propio documento exige. |

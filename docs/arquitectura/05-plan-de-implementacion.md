@@ -124,26 +124,50 @@ La fase de mayor densidad de bugs potenciales por línea de código.
 - Expansión de recurrencia: generador `RRULE` (subconjunto RFC 5545) y generador `CYCLE`.
 - Aplicación de excepciones ancladas por instante original.
 - Resolución de zona horaria con `timezone_overrides` y `anchor`.
-- **Guardrail de reloj y aleatoriedad — heredado de la fase 0, dueño: `engine-dev`.** La fase 0
-  dejó mecanizada la prohibición de I/O en el núcleo, pero **solo cubre imports**.
-  `Date.now()`, `new Date()` sin argumentos y `Math.random()` son globales, no módulos:
-  `dependency-cruiser` no puede verlos con ninguna configuración. Hace falta una regla de Biome
-  (`noRestrictedGlobals` o equivalente) sobre `packages/{engine,temporal,domain}`, enganchada a
-  `pnpm lint` y por tanto a `pnpm verify`. Entra aquí y no antes porque es ahora cuando hay
-  código que proteger.
+- **Guardrail de reloj y aleatoriedad — heredado de la fase 0, dueño: `engine-dev`.**
+  ✅ **entregado el 2026-07-29.** La fase 0 dejó mecanizada la prohibición de I/O en el núcleo,
+  pero **solo cubre imports**. `Date.now()`, `new Date()` sin argumentos y `Math.random()` son
+  globales, no módulos: `dependency-cruiser` no puede verlos con ninguna configuración. Entra
+  aquí y no antes porque es ahora cuando hay código que proteger.
 
 **Orden dentro de la fase, decidido el 2026-07-29:** el guardrail va **primero**, antes de
 `PlanningDay` y de cualquier lógica temporal. La valla se pone antes que las ovejas: escrito al
 final, obliga a limpiar violaciones ya introducidas; escrito al principio, impide introducirlas.
+Es también el argumento que metió a `packages/ical` en el alcance siete fases antes de que ese
+paquete tenga una línea de código.
 
-Y una precisión que condiciona el mecanismo: **restringir el global `Date` a secas es demasiado
-grueso**. `new Date(instanteISO)` es legítimo y necesario, igual que `Math.max` y `Math.floor`;
-lo prohibido es `Date.now()`, `new Date()` *sin argumentos* y `Math.random()`. Un guardrail que
-obliga a poner excepciones cada dos archivos deja de ser un guardrail al tercer mes. Si Biome
-2.5.6 no distingue esas formas con precisión —valorar sus plugins GritQL—, es preferible un
-chequeo propio en `pnpm verify`, al estilo de `scripts/verificar-cobertura-grafo.mjs`, que una
-regla estándar que haya que silenciar. Verificar también el caso contrario: que las formas
-legítimas **no** dan falso positivo.
+### El guardrail, como quedó
+
+**Mecanismo: un plugin GritQL de Biome**, `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit`,
+aplicado por `overrides` en `biome.json` y enganchado por tanto a `pnpm lint` y a `pnpm verify`.
+Casa contra cuatro formas sintácticas —`Date.now`, `Math.random`, `new Date()` y `new Date`
+suelto— y **no** dispara con `new Date(argumento)`, `Math.max` ni `Math.floor`. Los cuatro
+patrones no son redundantes: `new Date()` no casa con `new Date` y viceversa; hacen falta los
+dos para cubrir la llamada y la referencia.
+
+**`noRestrictedGlobals` no sirve, y este documento se equivocaba al nombrarla** (corregido el
+2026-07-29 tras comprobarlo). Esa regla restringe el identificador global entero y no admite
+forma sintáctica, así que es incapaz de la precisión que el propio plan exigía: prohibir `Date`
+mataría `new Date(instanteISO)` y prohibir `Math` mataría `Math.max` y `Math.floor`. Las tres
+son legítimas y aparecen constantemente en aritmética temporal, de modo que la regla obligaría
+a poner excepciones cada dos archivos — y un guardrail que se silencia deja de serlo al tercer
+mes. La precisión no es un lujo aquí: es la condición para que el guardrail sobreviva.
+
+**Alcance: `packages/{engine,temporal,domain,ical}`.** Los tres primeros por el determinismo del
+motor. `ical` por [ADR-017](./adr/ADR-017-determinismo-del-ics.md): el `.ics` de una versión de
+plan tiene que ser reproducible byte a byte, y `DTSTAMP` —obligatorio en cada `VEVENT`— es el
+sitio exacto por donde entraría el reloj. Fuera de esos cuatro el reloj es legítimo: `apps/api`
+es quien lo lee y materializa el `now` que el motor recibe como parámetro, y `apps/web` necesita
+la hora actual para pintar el calendario.
+
+**`pnpm guardrail:cobertura` — por qué existe.** El modo de fallo del guardrail es
+**silencioso**. Comprobado el 2026-07-29: con el `overrides.includes` apuntando a una ruta que
+no existe, `biome check` responde `Checked N files` y sale con código 0. Verde limpio,
+indistinguible de un run sano, con el núcleo entero sin proteger. El script escribe un canario
+en cada paquete del alcance con las formas prohibidas y las legítimas, y exige que las señaladas
+sean **exactamente** las prohibidas: verifica las dos direcciones, incluida la ausencia de
+falsos positivos. Es el mismo papel que `depcruise:cobertura` cumple para el grafo, y responde a
+la lección de la fase 0 — un guardrail que no se ha visto fallar es una intención.
 
 **Dependencia externa:** `@js-temporal/polyfill` o `Temporal` nativo si el runtime lo
 soporta; `rrule` para el subconjunto RFC 5545. **No** `moment`, **no** `date-fns` con zonas:
@@ -162,9 +186,11 @@ tipos distintos, que es justamente lo que evita la clase entera de errores de me
 - Cobertura de ramas ≥ 95 % en este paquete (el único con umbral obligatorio). Se declara como
   umbral por glob en el `vitest.config.ts` **raíz**: en Vitest 4 la cobertura es configuración
   de raíz, no de proyecto.
-- **Un `Date.now()` escrito a propósito dentro de `packages/temporal` rompe `pnpm verify`.** Se
-  comprueba igual que la frontera de la fase 0: añadiéndolo una vez y viendo fallar. Un
-  guardrail que no se ha visto fallar es una intención — es la lección que dejó la fase 0.
+- **Un `Date.now()` escrito a propósito dentro de `packages/temporal` rompe `pnpm verify`.** ✅
+  Cumplido, y de forma más fuerte de lo que pedía el criterio: en vez de una prueba manual de
+  una sola vez, `pnpm guardrail:cobertura` inyecta el canario y comprueba las dos direcciones
+  **en cada ejecución**. Un guardrail que no se ha visto fallar es una intención — es la
+  lección que dejó la fase 0.
 
 **Desbloquea** el motor y la persistencia de recurrencias.
 
@@ -339,13 +365,27 @@ la que las fases están separadas así.
 - Revisión semanal con métricas del brief y propuestas de recalibración.
 - Trabajo programado de detección de compromisos expirados.
 - `GET /me/export` y `DELETE /me`.
+- **Los campos de identidad de versión del `VEVENT`.** `DTSTAMP`, `LAST-MODIFIED` y `CREATED`
+  salen del instante de creación de la versión del plan, nunca del reloj
+  ([ADR-017](./adr/ADR-017-determinismo-del-ics.md)); el guardrail de la fase 1 ya lo impone
+  sobre `packages/ical`. **`SEQUENCE` queda por decidir aquí**, y hay que decidirlo a
+  conciencia: algunos clientes lo miran para aceptar una actualización, y su valor correcto
+  depende de la clasificación por bloque que produce el diff de la fase 5 (`UNCHANGED` /
+  `MOVED`). Se anota para que sea una elección y no un descubrimiento a mitad de fase.
 
 **Criterio de aceptación**
 - El `.ics` se suscribe correctamente en Google Calendar y Apple Calendar (prueba manual con
   ambos, es donde aparecen las incompatibilidades reales).
 - Un bloque que se mueve entre versiones **se actualiza** en el cliente de calendario en vez
   de duplicarse. Prueba manual: es el fallo más común de los feeds `.ics` y el que hace que
-  la gente se dé de baja.
+  la gente se dé de baja. **Lo que se verifica aquí es el `UID`**, que es lo que decide la
+  deduplicación (`UID` = `lineageId` + dominio, [ADR-008](./adr/ADR-008-sincronizacion-calendarios.md));
+  es decir, este criterio prueba el linaje de [ADR-006](./adr/ADR-006-versionado-de-plan-y-diff.md).
+  `DTSTAMP` no interviene en la deduplicación y mirarlo aquí sería probar la cosa equivocada.
+- **Dos solicitudes del mismo feed sin replanificación de por medio devuelven el mismo cuerpo
+  byte a byte**, y la segunda con `If-None-Match` responde `304`. Es el test de que el `ETag`
+  prometido en [04 §8](./04-contratos-api.md) sirve para algo y de que el `.ics` no lleva
+  reloj dentro.
 - El feed no incluye bloques `FIXED` ni `TRANSITION`.
 - `DELETE /me` deja el feed devolviendo `404`. Test de integración dedicado.
 - La revisión semanal muestra cosas cerradas y dispersión **antes** que cualquier dato de
@@ -406,8 +446,11 @@ la que las fases están separadas así.
 - **Nada de aleatoriedad en el motor**, ni siquiera con semilla. El desempate es un orden
   total explícito. Un motor con aleatoriedad sembrada sigue siendo sensible a reordenamientos
   de la entrada, y P10 lo destaparía.
-- **Nada de `Date.now()`** dentro de `engine` ni `temporal`. Un test de arquitectura lo
-  verifica.
+- **Nada de `Date.now()`, `new Date()` sin argumentos ni `Math.random()`** dentro de
+  `engine`, `temporal`, `domain` ni `ical`. No es un test de arquitectura sino un plugin
+  GritQL de Biome enganchado a `pnpm lint`, más `pnpm guardrail:cobertura`, que verifica que
+  el plugin sigue viendo los cuatro paquetes y que no da falsos positivos sobre
+  `new Date(argumento)`, `Math.max` ni `Math.floor`. Detalle en la fase 1.
 
 ### Cómo se testea el motor de forma determinista, en concreto
 
@@ -427,8 +470,13 @@ Tres mecanismos que se refuerzan entre sí:
 
 Límites que no se cruzan sin un ADR nuevo:
 
-1. **`packages/engine` y `packages/temporal` no tienen dependencias de I/O.** Ni base de
-   datos, ni HTTP, ni sistema de archivos, ni reloj.
+1. **`packages/engine`, `packages/temporal` y `packages/domain` no tienen dependencias de
+   I/O.** Ni base de datos, ni HTTP, ni sistema de archivos, ni reloj. Son dos mecanizaciones
+   distintas y conviene no confundirlas: `dependency-cruiser` cubre el I/O **importado**, y el
+   plugin GritQL de la fase 1 cubre el reloj y el azar, que son globales y no imports. El
+   segundo alcanza además a **`packages/ical`**, que no es I/O-libre por la misma razón sino
+   por [ADR-017](./adr/ADR-017-determinismo-del-ics.md): su salida tiene que ser reproducible
+   byte a byte.
 2. **El validador no importa nada del colocador.** La duplicación es deliberada.
 3. **No se añade ningún campo que registre, insinúe o permita inferir información médica.**
    Ante la duda, la respuesta es no. Ver [ADR-011](./adr/ADR-011-privacidad-por-diseno.md).

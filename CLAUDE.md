@@ -32,13 +32,14 @@ improvises ni lo sustituyas por otro. Si crees que falta uno, dilo.
 
 | Comando | Qué hace |
 |---|---|
-| `pnpm verify` | La puerta: `typecheck` + `lint` + `test` + `depcruise` + `depcruise:cobertura`. Pasa antes de cualquier commit |
+| `pnpm verify` | La puerta: `typecheck` + `lint` + `test` + `depcruise` + `depcruise:cobertura` + `guardrail:cobertura`. Pasa antes de cualquier commit |
 | `pnpm typecheck` | `tsc` en cada paquete, sin cortar en el primer fallo |
 | `pnpm lint` / `pnpm format` | Biome. `format` escribe los cambios |
 | `pnpm test` | Vitest sobre todos los proyectos |
 | `pnpm test:engine` | Solo `@oa/engine`. Rápido, sin base de datos |
 | `pnpm depcruise` | Grafo de dependencias: **¿hay aristas prohibidas?** |
 | `pnpm depcruise:cobertura` | **¿El análisis está mirando lo que debe?** Falla si un paquete desaparece del grafo — un ruleset que no ve nada pasaría en verde sin esto |
+| `pnpm guardrail:cobertura` | **¿El guardrail de reloj sigue viendo los paquetes que dice?** Inyecta un canario y exige que señale las 3 formas prohibidas y ninguna legítima. Un `overrides` que deja de casar sale en verde sin esto |
 
 Llegan en su fase y **no antes**: `test:integration` y `db:generate`/`db:migrate` (fase 2),
 `test:golden` (fase 3), `dev` (fase 6).
@@ -70,12 +71,16 @@ dependency-cruiser **18**
 
 ## Límites que no se cruzan sin un ADR nuevo
 
-1. `packages/engine` y `packages/temporal` **no tienen dependencias de I/O**: ni base de
-   datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un parámetro.
-   `dependency-cruiser` lo verifica en CI **y está demostrado que salta** — pero solo ve
-   **imports**. `Date.now()`, `new Date()` y `Math.random()` son globales, no módulos: **hoy no
-   los detecta nadie.** Mecanizarlo es entrega de la fase 1, dueño `engine-dev`. Hasta
-   entonces, esa mitad de la regla la sostienes tú, no la herramienta.
+1. `packages/engine`, `packages/temporal` y `packages/domain` **no tienen dependencias de
+   I/O**: ni base de datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un
+   parámetro. Son **dos mecanizaciones distintas y las dos están demostradas**:
+   `dependency-cruiser` cubre el I/O **importado**, y el plugin GritQL
+   `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit` cubre `Date.now()`, `new Date()` sin
+   argumentos y `Math.random()`, que son globales y no imports. `new Date(argumento)`,
+   `Math.max` y `Math.floor` **sí** están permitidos. El plugin alcanza además a
+   `packages/ical`, que no es I/O-libre por la misma razón sino porque su salida debe ser
+   reproducible byte a byte (ADR-017). Que cada guardrail siga mirando lo que debe lo
+   verifican `depcruise:cobertura` y `guardrail:cobertura`.
 2. El validador del motor **no importa nada del módulo de colocación**. La duplicación es
    deliberada: si compartieran utilidades, la validación sería una tautología.
 3. **Ningún campo que registre, insinúe o permita inferir información médica.** Las
@@ -114,6 +119,8 @@ motivacional, ni rellenar cada minuto disponible del día.
 - La unidad de planificación es la **jornada** (`[wake, nextWake)`), no el día calendario.
   La semana es una ventana de consulta, nunca una entidad. **No existe tabla `weeks`.**
 - Un plan imposible **no es un error**: es `200 OK` con `feasibility: "INFEASIBLE"`.
+- Los instantes del `.ics` (`DTSTAMP`, `CREATED`, `LAST-MODIFIED`) salen de la versión del
+  plan, **nunca del reloj**. Ver ADR-017.
 
 ## Git
 
