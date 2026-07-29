@@ -18,10 +18,10 @@ Al aplicarlo se añadió una subsección que este bloque no traía, **"Correccio
 a los agentes globales"**: los agentes de `~/.claude/agents/` asumen NestJS + Prisma y buscan
 los ADRs en `docs/adr/`, rutas y stack que no corresponden a este proyecto.
 
-**Nota:** varias líneas mencionan versiones y comandos que **todavía no existen** (el repo
-tiene documentación, `CLAUDE.md` y control de versiones, pero ni una línea de código). Deben
-confirmarse al cerrar la fase 0; hasta entonces son la intención del diseño, no un hecho
-verificable.
+**Nota, resuelta el 2026-07-29:** el bloque original mencionaba versiones y comandos que no
+existían. Al cerrar la fase 0 se confirmaron unos y se descubrió que otros **no debían
+crearse**. La actualización que corrige eso está en la §3 de este documento, al final: es lo
+que hay que aplicar a `CLAUDE.md` ahora.
 
 ---
 
@@ -140,3 +140,83 @@ fechas erosionaría primero:
 | Pasado inmutable | La evidencia de cumplimiento, insumo de la recalibración |
 | Sin títulos copiados | Que el derecho de supresión siga siendo ejecutable a granularidad fina |
 | Anti-requisitos listados | Que no vuelvan disfrazados de "mejora rápida" |
+
+---
+
+## 3. Actualización tras cerrar la fase 0 (2026-07-29) — bloques a aplicar en `CLAUDE.md`
+
+El bloque de arriba se escribió antes de que existiera una línea de código y **hoy miente en
+dos sitios**: anuncia cinco comandos que se decidió deliberadamente **no** crear
+([`fase-0-ejecucion.md §4.4`](./fase-0-ejecucion.md)) y omite los dos que sí existen. Un
+`CLAUDE.md` que enumera comandos inexistentes es peor que uno incompleto: un agente que
+encuentra `pnpm db:migrate` documentado y ausente asume que el entorno está roto y se pone a
+"arreglarlo".
+
+Cuatro sustituciones quirúrgicas. Nada más cambia.
+
+### A. Sustituye el bloque de estado del repo (el `>` bajo el título)
+
+```markdown
+> **Estado del repo:** fase 0 cerrada el 2026-07-29. El andamiaje existe y funciona: monorepo
+> pnpm con los 7 paquetes, TypeScript, Biome, Vitest, `dependency-cruiser` y CI en GitHub
+> Actions, con la frontera del motor verificada en las dos mitades (paquetes npm y built-ins de
+> Node). Los paquetes están **vacíos a propósito**: solo una constante `PACKAGE_ID` de
+> andamiaje y su test de humo, que se borran en la fase que dé contenido a cada uno.
+```
+
+### B. Sustituye la sección `## Comandos` entera
+
+```markdown
+## Comandos
+
+Estos son los que existen. **Un comando que no está en esta tabla no existe todavía**: no lo
+improvises ni lo sustituyas por otro. Si crees que falta uno, dilo.
+
+| Comando | Qué hace |
+|---|---|
+| `pnpm verify` | La puerta: `typecheck` + `lint` + `test` + `depcruise` + `depcruise:cobertura`. Pasa antes de cualquier commit |
+| `pnpm typecheck` | `tsc` en cada paquete, sin cortar en el primer fallo |
+| `pnpm lint` / `pnpm format` | Biome. `format` escribe los cambios |
+| `pnpm test` | Vitest sobre todos los proyectos |
+| `pnpm test:engine` | Solo `@oa/engine`. Rápido, sin base de datos |
+| `pnpm depcruise` | Grafo de dependencias: **¿hay aristas prohibidas?** |
+| `pnpm depcruise:cobertura` | **¿El análisis está mirando lo que debe?** Falla si un paquete desaparece del grafo — un ruleset que no ve nada pasaría en verde sin esto |
+
+Llegan en su fase y **no antes**: `test:integration` y `db:generate`/`db:migrate` (fase 2),
+`test:golden` (fase 3), `dev` (fase 6).
+```
+
+### C. Añade después de `## Comandos`
+
+```markdown
+## Versiones y convenciones de compilación
+
+Todas las versiones viven en el `catalog:` de `pnpm-workspace.yaml`. No las cambies sin decirlo.
+
+Node **24** · pnpm **11.17.0** · TypeScript **6.0.x** · Vitest **4** · Biome **2.5.6** ·
+dependency-cruiser **18**
+
+- **No instales `typescript@latest`.** Hoy resuelve a 7.x, que no publica API programática y
+  con el que `dependency-cruiser` no funciona: se perdería la frontera del motor entera. Ver
+  ADR-016.
+- **Los imports llevan extensión explícita y real**: `./foo.ts`, no `./foo` ni `./foo.js`
+  (`moduleResolution: nodenext` + `allowImportingTsExtensions`). Biome lo verifica; si lo
+  olvidas, `pnpm lint` falla.
+- **`target`/`lib` es `es2024`, no `es2025`.** Es deliberado: `es2025` traería los tipos de
+  `Temporal` al ámbito global y Node 24 no lo implementa sin flag, así que compilaría y
+  reventaría en ejecución. Si necesitas `Temporal`, impórtalo explícitamente del polyfill.
+```
+
+### D. Sustituye el límite nº 1 de "Límites que no se cruzan"
+
+Es el cambio más importante de los cuatro: sin él, `engine-dev` empieza la fase 1 creyendo que
+el reloj está cubierto mecánicamente, y no lo está.
+
+```markdown
+1. `packages/engine` y `packages/temporal` **no tienen dependencias de I/O**: ni base de
+   datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un parámetro.
+   `dependency-cruiser` lo verifica en CI **y está demostrado que salta** — pero solo ve
+   **imports**. `Date.now()`, `new Date()` y `Math.random()` son globales, no módulos: **hoy no
+   los detecta nadie.** Mecanizarlo es entrega de la fase 1, dueño `engine-dev`. Hasta
+   entonces, esa mitad de la regla la sostienes tú, no la herramienta.
+```

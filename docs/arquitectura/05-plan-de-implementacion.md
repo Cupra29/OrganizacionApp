@@ -65,7 +65,22 @@ quedarse solo con producción y desarrollo local, y añadirlos si algún día ha
 
 ---
 
-## Fase 0 — Andamiaje
+## Fase 0 — Andamiaje ✅ **cerrada el 2026-07-29**
+
+> Plan de ejecución, decisiones y evidencia: [`fase-0-ejecucion.md`](./fase-0-ejecucion.md).
+> Guion repetible de la prueba de frontera: [`../qa/fase-0-frontera.md`](../qa/fase-0-frontera.md).
+> Versión del compilador: [ADR-016](./adr/ADR-016-version-de-typescript.md).
+>
+> **Lo que la fase garantiza:** un import prohibido dentro de `packages/engine` rompe CI, y está
+> demostrado en las dos mitades — paquetes npm (`drizzle-orm` realmente instalado dispara
+> `sin-io-en-nucleo`) y built-ins de Node (`node:fs/promises` dispara
+> `sin-io-nativo-en-nucleo`). Además, el análisis se vigila a sí mismo: si dependency-cruiser
+> deja de ver un paquete, CI falla nombrándolo.
+>
+> **Lo que NO garantiza, y hay que saberlo antes de la fase 1:** `Date.now()`, `new Date()` y
+> `Math.random()` **no son imports**, así que `dependency-cruiser` no puede verlos con ninguna
+> configuración. El determinismo del motor sigue sin protección mecánica hasta que la fase 1 lo
+> resuelva.
 
 **Entrega**
 - Monorepo pnpm con la estructura de [01 §6](./01-arquitectura.md).
@@ -75,15 +90,26 @@ quedarse solo con producción y desarrollo local, y añadirlos si algún día ha
 - `CLAUDE.md` del proyecto con lo propuesto en [07](./07-convenciones-propuestas.md).
 
 **Criterio de aceptación**
-- `pnpm verify` pasa en limpio en CI.
+- `pnpm verify` pasa en limpio en CI. ✅
 - **Un import de `drizzle-orm` dentro de `packages/engine` rompe el build.** Se comprueba
   añadiéndolo a propósito una vez y viendo fallar CI. Esta prueba es el objetivo real de la
-  fase: sin ella, la frontera del motor es una intención y no una garantía.
+  fase: sin ella, la frontera del motor es una intención y no una garantía. ✅
 
-**Desbloquea** todo. **Ya no está bloqueada**: Q1 se resolvió el 2026-07-27 como SaaS
-multiusuario, así que la autenticación de [ADR-010](./adr/ADR-010-autenticacion.md) entra en
-firme. Conviene resolver Q12 (tamaño de equipo y plazo) antes de cerrar esta fase, porque
-podría reabrir la elección de stack de [ADR-001](./adr/ADR-001-stack-y-monorepo.md).
+  **Matiz descubierto al ejecutarlo**, que vale para cualquier repetición futura: el criterio
+  tal cual está escrito **no basta**. Un `drizzle-orm` sin instalar es irresoluble y dispara
+  `not-to-unresolvable` (higiene de dependencias), así que CI se pone rojo **aunque la regla de
+  frontera no exista**. Y esperar a la fase 2 no lo arregla: Drizzle se instala en `apps/api`,
+  y el `node_modules` aislado de pnpm no lo hace resoluble desde `packages/engine`. La prueba
+  válida exige declararlo en `packages/engine` para que resuelva de verdad. Detalle en
+  [`fase-0-ejecucion.md §6.bis`](./fase-0-ejecucion.md).
+
+**Desbloquea** todo. Q1 se resolvió el 2026-07-27 como SaaS multiusuario, así que la
+autenticación de [ADR-010](./adr/ADR-010-autenticacion.md) entra en firme. Q12 (tamaño de
+equipo y plazo) se resolvió el 2026-07-27 y la disponibilidad el 2026-07-28: no reabrieron la
+elección de stack de [ADR-001](./adr/ADR-001-stack-y-monorepo.md), que se reexaminó y se
+mantuvo.
+
+**Coste real**: dentro de lo estimado. La partida que más se subestima es el primer CI verde.
 
 ---
 
@@ -98,6 +124,13 @@ La fase de mayor densidad de bugs potenciales por línea de código.
 - Expansión de recurrencia: generador `RRULE` (subconjunto RFC 5545) y generador `CYCLE`.
 - Aplicación de excepciones ancladas por instante original.
 - Resolución de zona horaria con `timezone_overrides` y `anchor`.
+- **Guardrail de reloj y aleatoriedad — heredado de la fase 0, dueño: `engine-dev`.** La fase 0
+  dejó mecanizada la prohibición de I/O en el núcleo, pero **solo cubre imports**.
+  `Date.now()`, `new Date()` sin argumentos y `Math.random()` son globales, no módulos:
+  `dependency-cruiser` no puede verlos con ninguna configuración. Hace falta una regla de Biome
+  (`noRestrictedGlobals` o equivalente) sobre `packages/{engine,temporal,domain}`, enganchada a
+  `pnpm lint` y por tanto a `pnpm verify`. Entra aquí y no antes porque es ahora cuando hay
+  código que proteger.
 
 **Dependencia externa:** `@js-temporal/polyfill` o `Temporal` nativo si el runtime lo
 soporta; `rrule` para el subconjunto RFC 5545. **No** `moment`, **no** `date-fns` con zonas:
@@ -113,7 +146,12 @@ tipos distintos, que es justamente lo que evita la clase entera de errores de me
 - Una excepción creada antes de un cambio de horario sigue apuntando a la instancia correcta
   después.
 - Property test: `∀ jornada: sueño + vigilia == nextWake − wake`, exacto al minuto.
-- Cobertura de ramas ≥ 95 % en este paquete (el único con umbral obligatorio).
+- Cobertura de ramas ≥ 95 % en este paquete (el único con umbral obligatorio). Se declara como
+  umbral por glob en el `vitest.config.ts` **raíz**: en Vitest 4 la cobertura es configuración
+  de raíz, no de proyecto.
+- **Un `Date.now()` escrito a propósito dentro de `packages/temporal` rompe `pnpm verify`.** Se
+  comprueba igual que la frontera de la fase 0: añadiéndolo una vez y viendo fallar. Un
+  guardrail que no se ha visto fallar es una intención — es la lección que dejó la fase 0.
 
 **Desbloquea** el motor y la persistencia de recurrencias.
 
@@ -234,6 +272,13 @@ la que las fases están separadas así.
 - CRUD de las entidades de dominio.
 - Endpoints de diagnóstico, planes, versiones, aceptación y previsualización.
 - Materializador de `EngineInput` desde la base de datos.
+- **Decisión heredada de la fase 0: cómo se ejecuta `apps/api`.** El andamiaje quedó con
+  `moduleResolution: nodenext` y `allowImportingTsExtensions`, así que los imports llevan
+  extensión `.ts` real y los paquetes se consumen desde `src/`, sin paso de build. Es coherente
+  y deliberado, pero significa que **esta es la primera fase en que algo tiene que ejecutarse
+  de verdad**, y hay que elegir entre el type-stripping nativo de Node 24 o un bundler
+  (`tsdown`/`tsx`). Viable por las dos vías; no cambia ninguna decisión de arquitectura. Se
+  anota aquí para que sea una elección y no un descubrimiento a mitad de fase.
 
 **Criterio de aceptación**
 - Test de aislamiento: para **cada** endpoint, el usuario A recibe 404 con recursos de B.

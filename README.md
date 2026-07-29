@@ -2,9 +2,10 @@
 
 **Planificación de agenda que diagnostica antes de agendar.**
 
-> **Estado: diseño terminado, sin una línea de código todavía.** Este repositorio contiene
-> la arquitectura, 15 ADRs aceptados y el plan de implementación por fases. La fase 0 aún no
-> arranca.
+> **Estado: fase 0 cerrada (2026-07-29). Andamiaje en pie, producto sin empezar.** El
+> repositorio contiene la arquitectura, 16 ADRs aceptados, el plan por fases y un monorepo que
+> compila, se prueba y verifica sus propias fronteras en CI. Los paquetes están vacíos a
+> propósito: la fase 1 (núcleo temporal) es la primera con código de producto.
 
 ---
 
@@ -58,7 +59,8 @@ Todo el diseño vive en [`docs/arquitectura/`](docs/arquitectura/).
 | [04 — Contratos de API](docs/arquitectura/04-contratos-api.md) | Entrevista, plan, diagnóstico, seguimiento, exportación |
 | [05 — Plan de implementación](docs/arquitectura/05-plan-de-implementacion.md) | Fases con criterios de aceptación y estrategia de test |
 | [06 — Preguntas abiertas](docs/arquitectura/06-preguntas-abiertas.md) | Las 12 ambigüedades del brief, todas resueltas |
-| [ADRs](docs/arquitectura/adr/) | 15 decisiones con contexto, alternativas y consecuencias |
+| [Fase 0 — ejecución](docs/arquitectura/fase-0-ejecucion.md) | Cómo se levantó el andamiaje, qué se decidió y la evidencia de que la frontera del motor se rompe cuando debe |
+| [ADRs](docs/arquitectura/adr/) | 16 decisiones con contexto, alternativas y consecuencias |
 
 ## Cinco decisiones irreversibles
 
@@ -76,13 +78,20 @@ reescribir el núcleo.
 El motor es **100 % determinista**. Un modelo de lenguaje no puede *garantizar* cero solapes
 ni hacer demostrable la regla del sacrificio ordinal.
 
-## Stack previsto
+## Stack
 
 Monorepo pnpm con TypeScript `strict` de extremo a extremo. Fastify + Drizzle + PostgreSQL 16
 en el API; React + Vite en la interfaz. El motor y las utilidades temporales son paquetes
 puros, sin I/O. Detalle y alternativas descartadas en
-[ADR-001](docs/arquitectura/adr/ADR-001-stack-y-monorepo.md) y
-[ADR-002](docs/arquitectura/adr/ADR-002-persistencia-postgresql.md).
+[ADR-001](docs/arquitectura/adr/ADR-001-stack-y-monorepo.md),
+[ADR-002](docs/arquitectura/adr/ADR-002-persistencia-postgresql.md) y
+[ADR-016](docs/arquitectura/adr/ADR-016-version-de-typescript.md).
+
+**La pureza del motor no es una convención, es un fallo de build.** Un import de `drizzle-orm`
+—o de `node:fs`, o de `apps/api`— dentro de `packages/engine` rompe CI, y está demostrado
+rompiéndolo a propósito. `dependency-cruiser` vigila el grafo, y un segundo chequeo vigila que
+`dependency-cruiser` siga viendo el grafo: sin eso, un patrón mal escrito dejaría CI en verde
+sin proteger nada.
 
 ## Licencia
 

@@ -5,10 +5,11 @@ Instrucciones específicas de este proyecto. Se fusionan con las guías genéric
 
 Aplicado desde [`docs/arquitectura/07-convenciones-propuestas.md`](docs/arquitectura/07-convenciones-propuestas.md).
 
-> **Estado del repo:** hoy solo contiene documentación. Los paquetes, comandos y versiones
-> de abajo son **la intención del diseño, no un hecho verificable**: se confirman al cerrar
-> la fase 0. Si un comando no existe todavía, eso es lo esperado — no lo improvises ni lo
-> sustituyas por otro.
+> **Estado del repo:** fase 0 cerrada el 2026-07-29. El andamiaje existe y funciona: monorepo
+> pnpm con los 7 paquetes, TypeScript, Biome, Vitest, `dependency-cruiser` y CI en GitHub
+> Actions, con la frontera del motor verificada en las dos mitades (paquetes npm y built-ins de
+> Node). Los paquetes están **vacíos a propósito**: solo una constante `PACKAGE_ID` de
+> andamiaje y su test de humo, que se borran en la fase que dé contenido a cada uno.
 
 ---
 
@@ -26,16 +27,38 @@ Monorepo pnpm. TypeScript en modo `strict` en todo el stack.
 
 ## Comandos
 
-```
-pnpm verify          # typecheck + lint + tests + grafo de dependencias. Debe pasar antes de cualquier PR
-pnpm test            # todos los tests
-pnpm test:engine     # solo el motor (rápido, sin base de datos)
-pnpm test:golden     # fixtures de las variantes del brief
-pnpm test:integration# requiere Docker: levanta PostgreSQL con Testcontainers
-pnpm db:migrate      # aplica migraciones
-pnpm db:generate     # genera migración desde el esquema Drizzle
-pnpm dev             # api + web en modo desarrollo
-```
+Estos son los que existen. **Un comando que no está en esta tabla no existe todavía**: no lo
+improvises ni lo sustituyas por otro. Si crees que falta uno, dilo.
+
+| Comando | Qué hace |
+|---|---|
+| `pnpm verify` | La puerta: `typecheck` + `lint` + `test` + `depcruise` + `depcruise:cobertura`. Pasa antes de cualquier commit |
+| `pnpm typecheck` | `tsc` en cada paquete, sin cortar en el primer fallo |
+| `pnpm lint` / `pnpm format` | Biome. `format` escribe los cambios |
+| `pnpm test` | Vitest sobre todos los proyectos |
+| `pnpm test:engine` | Solo `@oa/engine`. Rápido, sin base de datos |
+| `pnpm depcruise` | Grafo de dependencias: **¿hay aristas prohibidas?** |
+| `pnpm depcruise:cobertura` | **¿El análisis está mirando lo que debe?** Falla si un paquete desaparece del grafo — un ruleset que no ve nada pasaría en verde sin esto |
+
+Llegan en su fase y **no antes**: `test:integration` y `db:generate`/`db:migrate` (fase 2),
+`test:golden` (fase 3), `dev` (fase 6).
+
+## Versiones y convenciones de compilación
+
+Todas las versiones viven en el `catalog:` de `pnpm-workspace.yaml`. No las cambies sin decirlo.
+
+Node **24** · pnpm **11.17.0** · TypeScript **6.0.x** · Vitest **4** · Biome **2.5.6** ·
+dependency-cruiser **18**
+
+- **No instales `typescript@latest`.** Hoy resuelve a 7.x, que no publica API programática y
+  con el que `dependency-cruiser` no funciona: se perdería la frontera del motor entera. Ver
+  ADR-016.
+- **Los imports llevan extensión explícita y real**: `./foo.ts`, no `./foo` ni `./foo.js`
+  (`moduleResolution: nodenext` + `allowImportingTsExtensions`). Biome lo verifica; si lo
+  olvidas, `pnpm lint` falla.
+- **`target`/`lib` es `es2024`, no `es2025`.** Es deliberado: `es2025` traería los tipos de
+  `Temporal` al ámbito global y Node 24 no lo implementa sin flag, así que compilaría y
+  reventaría en ejecución. Si necesitas `Temporal`, impórtalo explícitamente del polyfill.
 
 ## Dónde vive la documentación
 
@@ -49,7 +72,10 @@ pnpm dev             # api + web en modo desarrollo
 
 1. `packages/engine` y `packages/temporal` **no tienen dependencias de I/O**: ni base de
    datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un parámetro.
-   `dependency-cruiser` lo verifica en CI.
+   `dependency-cruiser` lo verifica en CI **y está demostrado que salta** — pero solo ve
+   **imports**. `Date.now()`, `new Date()` y `Math.random()` son globales, no módulos: **hoy no
+   los detecta nadie.** Mecanizarlo es entrega de la fase 1, dueño `engine-dev`. Hasta
+   entonces, esa mitad de la regla la sostienes tú, no la herramienta.
 2. El validador del motor **no importa nada del módulo de colocación**. La duplicación es
    deliberada: si compartieran utilidades, la validación sería una tautología.
 3. **Ningún campo que registre, insinúe o permita inferir información médica.** Las

@@ -1,12 +1,24 @@
 # Fase 0 — Plan de ejecución
 
 Fecha: 2026-07-28
-Estado: **propuesto** — requiere ratificar D1–D5 antes de despachar nada.
+Estado: **cerrado el 2026-07-29.** Los trece puntos de la definición de "hecho" (§7) se
+cumplen; la evidencia está en §9 y §9.1.
 Cubre: [05 §Fase 0](./05-plan-de-implementacion.md) y la estructura de
 [01 §6](./01-arquitectura.md).
 
-> Este documento es el guion de despacho. Cada tarea trae precondición, ejecutor, archivos
-> exactos y reporte de salida, para que se pueda copiar tal cual al brief de un agente.
+> Este documento fue el guion de despacho. Se conserva como está —con las correcciones
+> fechadas en el sitio donde estaba el error, no reescritas— porque su valor a partir de ahora
+> es el registro de qué se decidió, qué salió mal y cómo se comprobó.
+
+**Estado de las decisiones al cerrar:**
+
+| | Decisión | Resultado |
+|---|---|---|
+| D1 | TypeScript 6, no 7 | **Ratificada** y elevada a [ADR-016](./adr/ADR-016-version-de-typescript.md) |
+| D2 | `moduleResolution: nodenext` con extensiones explícitas | **Ratificada**, con una consecuencia añadida: `allowImportingTsExtensions` (ver §2, desviaciones) |
+| D3 | `target`/`lib` `es2024` para mantener `Temporal` fuera del ámbito global | **Ratificada** |
+| D4 | Stubs de los 7 paquetes | **Ratificada** |
+| D5 | Guardia contra el ruleset vacío | **Modificada.** La regla `required` no detectaba la ausencia de un módulo — verificado ejecutándolo. Sustituida por una aserción de presencia externa (§4.8) |
 
 ---
 
