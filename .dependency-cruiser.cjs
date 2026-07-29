@@ -15,9 +15,14 @@ const IO_EXTERNO = "drizzle-orm|fastify|pg|postgres|react|react-dom|axios|undici
 // fuera a propósito: no son I/O y prohibirlos daría falsos positivos.
 //
 // OJO: `Date.now()`, `new Date()` y `Math.random()` NO son imports, así que
-// dependency-cruiser no puede verlos con ninguna configuración. Ese guardrail se
-// implementa en la fase 1 con una regla de Biome o el test de arquitectura que
-// anuncia 05 §6. Hasta entonces el reloj NO está cubierto.
+// dependency-cruiser no puede verlos con ninguna configuración. Esa otra mitad la
+// cubre desde la fase 1 el plugin GritQL `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit`
+// (no `noRestrictedGlobals`, que mataría `new Date(argumento)` y `Math.max`; tampoco un
+// test de arquitectura), cuyo alcance declara el `overrides` de biome.json y verifica
+// `scripts/verificar-guardrail-nucleo.mjs` — el modo de fallo de ese alcance es silencioso.
+// Ese alcance incluye además `packages/ical`, que aquí NO aparece: entra por la
+// reproducibilidad del `.ics` (ADR-017), no por ausencia de I/O. Reparto: imports aquí,
+// globales allí.
 const IO_NATIVO =
   "fs|fs/promises|http|https|net|dgram|dns|tls|child_process|cluster|worker_threads|readline|repl|crypto|timers|timers/promises|perf_hooks";
 

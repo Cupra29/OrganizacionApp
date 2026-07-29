@@ -1,0 +1,45 @@
+// Guardrail de reloj y aleatoriedad en el núcleo — fase 1 de 05-plan-de-implementacion.md.
+//
+// `dependency-cruiser` sostiene una mitad del límite nº1 ("sin I/O en el núcleo"), pero solo
+// ve IMPORTS. `Date.now()`, `new Date()` sin argumentos y `Math.random()` son globales, no
+// módulos: ninguna configuración suya puede verlos. Esta es la otra mitad, y sin ella el
+// determinismo del motor es una intención y no una garantía.
+//
+// POR QUÉ UN PLUGIN GRITQL Y NO `noRestrictedGlobals`.
+// Esa regla restringe el identificador entero, y aquí el identificador entero no es el
+// problema. Prohibir `Date` mataría `new Date(instanteISO)`; prohibir `Math` mataría
+// `Math.max` y `Math.floor`. Las tres son legítimas y van a aparecer constantemente en
+// aritmética temporal, así que la regla obligaría a poner excepciones cada dos archivos —
+// y un guardrail que se silencia a menudo deja de serlo. GritQL casa contra la forma
+// sintáctica exacta, que es justo la precisión que pide el plan.
+//
+// LOS CUATRO PATRONES NO SON REDUNDANTES. Se comprobó uno por uno el 2026-07-29:
+//   `Date.now`     cubre la llamada Y la referencia suelta (`[...].map(Date.now)`).
+//   `Math.random`  ídem.
+//   `new Date()`   NO casa con `new Date` sin paréntesis.
+//   `new Date`     NO casa con `new Date()` con paréntesis. Hacen falta los dos.
+// Ninguno de los cuatro casa con `new Date(argumento)`, que es exactamente lo que se busca.
+//
+// ALCANCE: `packages/{engine,temporal,domain,ical}`, declarado en el `overrides` de biome.json.
+// Los tres del núcleo entran por el límite nº1 (ausencia de I/O, determinismo del motor).
+// `ical` entra por una propiedad DISTINTA y con motivo propio: la reproducibilidad del `.ics`
+// (ADR-017). No está en el límite nº1 ni en la regla de I/O de dependency-cruiser; lo que se
+// le exige es que su salida sea función únicamente de su entrada, así que el `DTSTAMP` de cada
+// `VEVENT` sale del instante de la versión del plan y entra como parámetro, nunca del reloj.
+// Fuera de esos cuatro el reloj es legítimo — `apps/api` necesita la hora real para
+// materializar el `now` que el motor recibe como parámetro.
+//
+// Que este plugin siga viendo esos cuatro paquetes lo verifica
+// `scripts/verificar-guardrail-nucleo.mjs`: un `overrides.includes` que deja de casar no
+// produce ningún error de Biome, solo silencio verde.
+
+language js
+
+or {
+  `Date.now`,
+  `Math.random`,
+  `new Date()`,
+  `new Date`
+} as $uso where {
+  register_diagnostic(span=$uso, message="Reloj o azar en el núcleo: aquí `now` entra siempre como parámetro. Sí están permitidos y no disparan: `new Date(argumento)`, `Math.max`, `Math.floor`.", severity="error")
+}

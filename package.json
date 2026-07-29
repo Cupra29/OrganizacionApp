@@ -15,7 +15,8 @@
     "test:engine": "vitest run --project @oa/engine",
     "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
     "depcruise:cobertura": "depcruise packages apps --config .dependency-cruiser.cjs --output-type json | node scripts/verificar-cobertura-grafo.mjs",
-    "verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run depcruise && pnpm run depcruise:cobertura"
+    "guardrail:cobertura": "node scripts/verificar-guardrail-nucleo.mjs",
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run depcruise && pnpm run depcruise:cobertura && pnpm run guardrail:cobertura"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

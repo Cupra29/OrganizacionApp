@@ -17,5 +17,16 @@
         "useImportExtensions": "error"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/engine/**",
+        "packages/temporal/**",
+        "packages/domain/**",
+        "packages/ical/**"
+      ],
+      "plugins": ["./scripts/biome/sin-reloj-ni-azar-en-nucleo.grit"]
+    }
+  ]
 }
