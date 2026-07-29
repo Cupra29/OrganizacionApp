@@ -20,6 +20,7 @@ Un ADR aceptado **no se edita**: se reemplaza por otro que lo supere.
 | [013](./ADR-013-motor-como-funcion-pura.md) | **El motor no conoce base de datos, red ni reloj** | aceptado | **No** |
 | [014](./ADR-014-cumplimiento-rgpd.md) | RGPD como techo; narrativas estructuradas, no texto redactado | aceptado | Parcialmente |
 | [015](./ADR-015-parametros-de-calibracion.md) | Fricción conservadora (15 % + 7 min) y corrección del tope emergente | aceptado | Sí |
+| [016](./ADR-016-version-de-typescript.md) | TypeScript 6.0, no el compilador nativo 7.0, hasta que exista la API programática | aceptado | Sí |
 
 Los cinco marcados como no reversibles (003, 005, 006, 011, 013) son puertas de una sola
 dirección: cambiarlos después implica migración destructiva o reescritura del núcleo. Son los
@@ -40,3 +41,4 @@ cambio de narrativas afecta a datos ya escritos, por eso se decidió antes de la
 | 2026-07-28 | Los 15 ADRs pasan de `propuesto` a **`aceptado`**. A partir de aquí ninguno se edita: se supera con otro. |
 | 2026-07-28 | Convenciones de [07](../07-convenciones-propuestas.md) aplicadas al `CLAUDE.md` de la raíz. Repositorio git inicializado. |
 | 2026-07-28 | **Disponibilidad confirmada en 10–20 h semanales**, último dato de entrada que quedaba sin confirmar. Cae dentro de la franja para la que el plan está dimensionado: ADR-001 y ADR-009 se mantienen sin cambios. Nota fechada en ADR-001 en vez de ADR de reemplazo, porque ninguna decisión cambia. |
+| 2026-07-29 | Nace **ADR-016** al ejecutar la fase 0: TypeScript 7.0 salió estable sin API programática y `dependency-cruiser` no lo soporta. Concreta la versión que ADR-001 dejaba abierta; no lo contradice. |

@@ -11,10 +11,15 @@
 // Paquetes de I/O que jamás pueden entrar al núcleo.
 const IO_EXTERNO = "drizzle-orm|fastify|pg|postgres|react|react-dom|axios|undici|node-fetch";
 
-// Built-ins de Node que implican I/O. `os` y `process` quedan fuera a propósito:
-// no son I/O y prohibirlos daría falsos positivos.
+// Built-ins de Node que implican I/O, reloj o aleatoriedad. `os` y `process` quedan
+// fuera a propósito: no son I/O y prohibirlos daría falsos positivos.
+//
+// OJO: `Date.now()`, `new Date()` y `Math.random()` NO son imports, así que
+// dependency-cruiser no puede verlos con ninguna configuración. Ese guardrail se
+// implementa en la fase 1 con una regla de Biome o el test de arquitectura que
+// anuncia 05 §6. Hasta entonces el reloj NO está cubierto.
 const IO_NATIVO =
-  "fs|fs/promises|http|https|net|dgram|dns|tls|child_process|cluster|worker_threads|readline|repl";
+  "fs|fs/promises|http|https|net|dgram|dns|tls|child_process|cluster|worker_threads|readline|repl|crypto|timers|timers/promises|perf_hooks";
 
 const NUCLEO = "^packages/(engine|temporal|domain)/";
 

@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:engine": "vitest run --project @oa/engine",
     "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
-    "verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run depcruise"
+    "depcruise:cobertura": "depcruise packages apps --config .dependency-cruiser.cjs --output-type json | node scripts/verificar-cobertura-grafo.mjs",
+    "verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run depcruise && pnpm run depcruise:cobertura"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

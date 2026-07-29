@@ -110,23 +110,97 @@ minúsculos; re-litigar la estructura dentro de seis fases cuesta más.
 `apps/web`), como stubs **sin dependencias de framework**. Ni Fastify en `api`, ni React en
 `web`.
 
-### D5 — Guardia contra el ruleset vacío: regla `required`, sin fixture envenenado permanente
+### D5 — Guardia contra el ruleset vacío ~~regla `required`~~ → **aserción de presencia sobre la salida JSON**
+
+**Revisada el 2026-07-29. La versión original era falsa y se comprobó ejecutándola.**
 
 El modo de fallo que más me preocupa de esta fase no es que la regla no salte: es que **un
 glob mal escrito haga que ninguna regla se evalúe nunca y CI quede verde sin proteger nada**.
-Una prueba negativa puntual no lo detecta si el error se introduce después.
+Una prueba negativa puntual no lo detecta si el error se introduce después. Ese razonamiento
+sigue en pie; el mecanismo que elegí para atenderlo, no.
 
-Dos formas de blindarlo:
+#### Lo que escribí y era falso
 
-- **(a)** Una regla `required` en `dependency-cruiser`: `packages/engine/src/index.ts` **debe**
-  depender de `packages/domain`. Si el grafo se vacía, la regla falla. Coste: 6 líneas de
-  configuración.
-- **(b)** Un fixture envenenado permanente en el repo más un paso de CI que exige que
-  `dependency-cruiser` falle sobre él. Coste: un directorio raro que hay que explicar para
-  siempre.
+> *"Una regla `required`: `packages/engine/src/index.ts` debe depender de `packages/domain`.
+> Si el grafo se vacía, la regla falla y CI se pone rojo."*
 
-**Recomendación: (a).** Da la misma garantía sin dejar una rareza permanente en un repositorio
-público. (b) queda como opción si algún día el ruleset se vuelve complejo.
+`qa-engineer` lo planteó como hipótesis al escribir el Caso 7 de
+[`docs/qa/fase-0-frontera.md`](../qa/fase-0-frontera.md) y se verificó ejecutándolo: añadiendo
+`exclude: { path: "packages/engine" }` a las opciones, el resultado es
+
+```
+✔ no dependency violations found (13 modules, 12 dependencies cruised)
+```
+
+Verde limpio, frente a los 15 módulos del run sano. `el-grafo-no-esta-vacio` no se dispara.
+
+**Por qué falla:** las reglas `required` se evalúan **módulo a módulo, sobre los módulos que el
+grafo contiene**. Detectan que a un módulo presente le falta una arista; no detectan que el
+módulo entero ha desaparecido. Cuando `packages/engine` sale del grafo no queda nada sobre lo
+que evaluar la regla, así que la regla no se evalúa y el resultado es éxito. Mi afirmación solo
+era cierta en el caso menos probable —el módulo sigue ahí y pierde la arista— y falsa en el más
+plausible, que es que el módulo desaparezca.
+
+**No hay mecanismo nativo.** Lo comprobé antes de proponer alternativa: todas las clases de
+regla de `dependency-cruiser` (`forbidden`, `allowed`, `required`) se evalúan sobre el grafo
+cruzado, y ninguna puede aseverar sobre lo que el grafo *no* contiene. Tampoco hay umbral de
+recuento en el CLI. Correr `depcruise` por paquete tampoco sirve: un `exclude` demasiado amplio
+vacía igualmente cada invocación y devuelve cero. **La aserción tiene que ser externa a la
+herramienta.**
+
+#### Mecanismo nuevo: presencia por ruta, nunca recuento
+
+Se aseveran dos cosas sobre la salida JSON de `depcruise`:
+
+1. **Los 7 módulos de entrada están presentes** en el conjunto cruzado:
+   `packages/{domain,temporal,engine,ical,contracts}/src/index.ts` y
+   `apps/{api,web}/src/index.ts`.
+2. **Ningún módulo de un paquete `@oa/*` aparece bajo `node_modules/`**, lo que convertiría la
+   resolución por symlink en no fiable.
+
+**Descarto el suelo por recuento**, que era la otra opción sobre la mesa, por tres razones y
+no por gusto:
+
+- **Deriva hacia arriba con cada archivo nuevo**, así que exige mantenimiento en un calendario
+  que no tiene nada que ver con la arquitectura. Un guardrail que hay que tocar cada semana se
+  acaba subiendo hasta que deja de proteger.
+- **Es satisfacible por accidente**: si `packages/engine` desaparece (−2 módulos) y alguien
+  añade dos tests en otro paquete (+2), el recuento cuadra y la protección se ha perdido en
+  silencio. Mide volumen, no cobertura, y lo que nos importa es cobertura.
+- **Cuando falla no dice qué se perdió.** "Hay menos módulos de los esperados" no es
+  accionable; "`packages/engine/src/index.ts` no está en el grafo" sí.
+
+La lista de 7 rutas se mantiene sola: solo cambia si cambia la estructura de paquetes de
+[01 §6](./01-arquitectura.md), que es exactamente el momento en que quieres que un humano
+piense. No hay deriva posible.
+
+#### Efecto colateral: cierra tres casos del guion de QA de una vez
+
+- **Caso 6** (glob de crawl roto): `depcruise` o bien erroriza y no emite JSON válido —el
+  script falla al parsear— o bien emite un grafo vacío —faltan los 7 módulos—. Rojo por las dos
+  ramas.
+- **Caso 7** (`exclude` que atrapa `packages/engine`): faltan sus módulos. Rojo. Es el caso que
+  destapó el fallo.
+- **Caso 8** (config ausente o rota): sin JSON válido, rojo.
+
+#### Cómo se demuestra que este guardrail sí funciona
+
+No basta con escribirlo: **hay que reejecutar el Caso 7 con el guardrail puesto y ver que se
+pone rojo nombrando `packages/engine/src/index.ts`.** Un guardrail contra fallos silenciosos
+que no se ha visto fallar es, otra vez, una intención. El resultado va al registro de
+ejecuciones de [`docs/qa/fase-0-frontera.md §9`](../qa/fase-0-frontera.md).
+
+#### Por qué esto no necesita un ADR
+
+El propósito no cambió —*el ruleset debe ser demostrablemente no vacío*— y D5 nunca fue un ADR:
+era una decisión de implementación dentro de este plan. Lo que cambió es que el mecanismo
+elegido no hacía lo que yo afirmé. Un ADR registra decisiones cuyas consecuencias sobreviven a
+su implementación; esto es un defecto de implementación, y su sitio es este documento y el
+registro del guion de QA. Abrir un ADR por cada corrección diluiría la serie.
+
+**Lo que sí hay que conservar es el hallazgo**, porque no es obvio y alguien volverá a proponer
+una regla `required` para esto dentro de un año: *las reglas `required` de `dependency-cruiser`
+no detectan la ausencia de un módulo.* Está escrito aquí arriba y en el Caso 7 del guion.
 
 ### No bloqueantes, pero conviene resolverlas pronto
 
@@ -135,6 +209,17 @@ público. (b) queda como opción si algún día el ruleset se vuelve complejo.
   pero conviene que sea explícito (`LICENSE` o una línea en el README) en vez de un vacío.
 - **`apps/web` en el `projects` de Vitest.** Cuando la fase 7 traiga React necesitará
   `environment: 'jsdom'`. Hoy no, y no hay que anticiparlo.
+
+### Desviaciones de T1 respecto al manifiesto — ratificadas el 2026-07-29
+
+Las tres son correctas y mejoran lo que yo había escrito. Quedan registradas porque dos tienen
+consecuencias más allá de la fase 0.
+
+| Desviación | Veredicto | Consecuencia que hay que recordar |
+|---|---|---|
+| `allowImportingTsExtensions` en `tsconfig.base.json` | **Correcta.** Es la consecuencia obligada de la combinación que yo elegí: `nodenext` + `exports` apuntando a `./src/index.ts` + `useImportExtensions` de Biome, que pide la extensión **real** del archivo. Los imports llevan `.ts` y son coherentes de punta a punta | **Nota para la fase 6**: los especificadores `.ts` exigen que `apps/api` se ejecute con el type-stripping nativo de Node o con un bundler. Es viable en Node 24 y no cambia ninguna decisión, pero decidirlo en la fase 6 y no descubrirlo |
+| `pnpm/action-setup` sin `version:`, leyendo de `packageManager` | **Mejor que lo que especifiqué.** Dar ambos aborta la acción, y así hay una sola fuente de verdad de la versión de pnpm | Ninguna. Corregir §4.6 si alguien lo copia de ahí |
+| Regex de `sin-io-en-nucleo` simplificado por rechazo de ReDoS | **Correcta como reacción**, pero deja una conjetura sin verificar | **Es la razón de §6.bis.** El regex nuevo no se ha ejecutado nunca contra una ruta resuelta real de pnpm. Sin esa prueba, la mitad npm de la frontera es una intención |
 
 ### Convenciones que este plan fija (vetables en una frase, no son ADR)
 
@@ -194,7 +279,11 @@ público. (b) queda como opción si algún día el ruleset se vuelve complejo.
 
 ## 4. Manifiesto de archivos
 
-**36 archivos.** Nada fuera de esta lista sin decirlo antes.
+**37 archivos.** Nada fuera de esta lista sin decirlo antes.
+
+> **Enmienda del 2026-07-29.** El manifiesto original tenía 36 archivos y ninguno era un
+> script. La corrección de D5 obliga a añadir uno: la aserción de presencia no se puede
+> expresar dentro de `dependency-cruiser`. Es la única excepción y va acotada en §4.8.
 
 ### 4.1 Raíz (10 archivos)
 
@@ -276,12 +365,25 @@ typecheck` basta. Se revisa si el typecheck completo pasa de ~10 s.
   "test": "vitest run",
   "test:engine": "vitest run --project @oa/engine",
   "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
-  "verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run depcruise"
+  // Enmienda 2026-07-29 (D5): cobertura del grafo, no violaciones. Ver §4.8.
+  "depcruise:cobertura": "depcruise packages apps --config .dependency-cruiser.cjs --output-type json | node scripts/verificar-cobertura-grafo.mjs",
+  "verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run depcruise && pnpm run depcruise:cobertura"
 }
 ```
 
 `--no-bail` en el typecheck para ver los errores de todos los paquetes de una pasada, no del
 primero que rompe. `verify` sí corta en el primer fallo: es una puerta, no un informe.
+
+**`depcruise` y `depcruise:cobertura` son dos comandos porque responden a dos preguntas
+distintas**, y mezclarlos perdería la salida legible del primero: *¿hay aristas prohibidas?*
+frente a *¿el análisis está mirando lo que debe mirar?*. Dos ejecuciones sobre un grafo de 15
+módulos cuestan milisegundos.
+
+Detalle que hay que conocer: en el `sh` de los scripts de npm no está activo `pipefail`, así
+que el código de salida de `depcruise:cobertura` es el del script de Node, no el de
+`depcruise`. Es **deliberado** — si hay violaciones, el rojo lo pone `pnpm depcruise` en el
+paso anterior; este comando solo opina sobre cobertura. Lo que sí propaga es el fallo cuando
+`depcruise` no emite JSON válido, que es como se detectan los Casos 6 y 8.
 
 Los scripts `test:golden`, `test:integration`, `db:generate`, `db:migrate` y `dev` que
 `CLAUDE.md` anuncia **no se crean**. Un script que hace `echo "no implementado"` es ruido que
@@ -348,6 +450,8 @@ jobs:
         if: ${{ !cancelled() }}
       - run: pnpm run depcruise
         if: ${{ !cancelled() }}
+      - run: pnpm run depcruise:cobertura      # enmienda 2026-07-29 (D5)
+        if: ${{ !cancelled() }}
 ```
 
 Sin `pull_request` por ahora: trabajando en solitario duplicaría ejecuciones y, en un repo
@@ -376,6 +480,48 @@ Aquí es donde un ejecutor se pondría creativo. No debe.
 
 **Ni un tipo del dominio en la fase 0.** `Minutes`, `Instant`, `PlanningDay` y compañía son
 diseño de la fase 1 y no se pre-cocinan aquí.
+
+### 4.8 `scripts/verificar-cobertura-grafo.mjs` — enmienda del 2026-07-29 (D5)
+
+El único archivo ejecutable del andamiaje. Existe porque la aserción que D5 necesita no se
+puede expresar dentro de `dependency-cruiser` (razonamiento completo en D5).
+
+**Entrada**: el reporte JSON de `depcruise` por `stdin`.
+**Salida**: nada en verde salvo una línea de confirmación; en rojo, qué falta y por qué.
+
+Tres comportamientos, en este orden:
+
+1. **JSON no parseable o `stdin` vacío** → error explícito ("`depcruise` no emitió un reporte
+   JSON válido: probablemente el argumento de crawl o la configuración están rotos") y salida
+   distinta de cero. **No se traga la excepción**: este caso *es* uno de los fallos que el
+   script vigila (Casos 6 y 8 del guion de QA), no un contratiempo.
+2. **Presencia obligatoria.** Los 7 módulos de entrada deben aparecer en `modules[].source`:
+
+   ```
+   packages/domain/src/index.ts      packages/ical/src/index.ts       apps/api/src/index.ts
+   packages/temporal/src/index.ts    packages/contracts/src/index.ts  apps/web/src/index.ts
+   packages/engine/src/index.ts
+   ```
+
+   Si falta alguno: listar **cuáles** (no cuántos) y salir con código distinto de cero.
+3. **Resolución por symlink sana.** Ningún `modules[].source` que corresponda a un paquete
+   `@oa/*` puede contener `node_modules/`. Si aparece, la resolución no está usando las rutas
+   reales del workspace y las reglas de frontera no se están aplicando donde creemos.
+
+Esta tercera aserción **sustituye al punto 4 de §7**, que hasta ahora era "mirar la salida y
+comprobar que no hay rutas de `node_modules`". Convertir una obligación humana recurrente en
+una comprobación mecánica es una reducción de trabajo, no una adición.
+
+**Límites del script**, para que no crezca:
+
+- No comprueba violaciones. Eso es de `pnpm depcruise`.
+- No comprueba recuentos. Ver D5.
+- No lee `.dependency-cruiser.cjs` ni deriva nada de él. Se consideró derivar la lista de
+  módulos obligatorios de los `from:` de cada regla —elegante, y cubriría reglas futuras
+  automáticamente— y se descartó: son 35 líneas de metaprogramación sobre un archivo de
+  configuración para mantener sincronizada una lista de 7 rutas que solo cambia si cambia
+  [01 §6](./01-arquitectura.md). Si el ruleset crece hasta que la lista se quede corta, se
+  reconsidera.
 
 ---
 
@@ -590,9 +736,95 @@ por encima, y además ensucia cualquier `git bisect` futuro que use "CI verde" c
 El valor del commit es la ejecución, no su presencia en el árbol; y la ejecución queda
 registrada en Actions y transcrita en §9. Descartar la rama no pierde nada que importe.
 
+### 6.bis — La mitad npm de `sin-io-en-nucleo`. Enmienda del 2026-07-29
+
+**El hueco.** Las tres comprobaciones del procedimiento de arriba se pasarían con la regla
+`sin-io-en-nucleo` **completamente ausente del ruleset**. La evidencia de §9 lo confirma: solo
+saltaron `nucleo-no-va-a-apps` y `not-to-unresolvable`. El import (a) —`drizzle-orm`, que es el
+criterio textual de [05](./05-plan-de-implementacion.md)— nunca llega a ejercitar la regla que
+supuestamente lo prohíbe.
+
+La mitad nativa ya está demostrada: `node:fs/promises` dispara `sin-io-nativo-en-nucleo` de
+forma aislada, porque los built-ins siempre resuelven. La mitad npm no.
+
+#### Diferirlo a la fase 2 no funciona, y es importante entender por qué
+
+La respuesta intuitiva es "esperar a que llegue `drizzle-orm` de verdad". **No sirve.** La fase
+2 instala `drizzle-orm` en `apps/api`, y con el `node_modules` aislado de pnpm eso **no lo hace
+resoluble desde `packages/engine`**. El import seguiría siendo irresoluble en la fase 2, en la
+6 y en la 9. Esperar no cambia nada.
+
+`sin-io-en-nucleo` solo puede dispararse cuando el paquete prohibido es **resoluble desde el
+paquete del núcleo**, porque la regla casa contra la ruta resuelta
+(`to: { path: "node_modules/(...)/" }`) y un módulo irresoluble no tiene ruta resuelta. Eso no
+es un defecto: es exactamente el ataque realista. Alguien que quiera usar Drizzle dentro del
+motor no escribirá un import roto — lo declarará en `packages/engine/package.json`, lo
+instalará y entonces resolverá. Los dos caminos están cubiertos (irresoluble →
+`not-to-unresolvable` + `no-deps-sin-declarar`; resoluble → `sin-io-en-nucleo`), pero solo uno
+está demostrado.
+
+#### Por qué esto no es opcional: el regex nunca se ha probado contra una ruta real
+
+El regex de `sin-io-en-nucleo` **se simplificó durante T1** porque `dependency-cruiser` rechazó
+el original por riesgo de ReDoS. La versión que quedó se ancla al último segmento
+`node_modules/` con la intención de casar tanto un layout plano como el `.pnpm/` de pnpm —y
+esa intención **no se ha verificado nunca contra una ruta resuelta de verdad**, que en pnpm
+tiene la forma `node_modules/.pnpm/drizzle-orm@X.Y.Z/node_modules/drizzle-orm/dist/index.js`.
+
+Un guardrail cuyo regex no se ha ejecutado sobre su entrada real es una conjetura. Esta prueba
+es lo que la convierte en un hecho, y cuesta tres minutos.
+
+#### Procedimiento (Modo B del guion de QA: local, sin commit)
+
+```bash
+git status --short                                  # árbol limpio
+
+pnpm --filter @oa/engine add drizzle-orm            # el ataque realista: declararlo
+# añadir a packages/engine/src/index.ts:
+#   import { drizzle } from 'drizzle-orm';
+pnpm depcruise
+
+# revertir SIEMPRE, aunque el resultado sea el esperado
+git checkout -- packages/engine/src/index.ts packages/engine/package.json pnpm-lock.yaml
+pnpm install
+git status --short                                  # limpio otra vez
+```
+
+**Criterio de éxito**: la salida nombra **`sin-io-en-nucleo`**. Nada más cuenta. Que salga rojo
+no vale: `no-deps-sin-declarar` ya no dispararía (la dependencia está declarada), pero cualquier
+otro ruido tampoco es prueba.
+
+**Si no salta**, el regex no casa con el layout de pnpm y hay que corregirlo **antes de cerrar
+la fase**. Es el escenario que justifica hacer esto ahora: descubrirlo en la fase 2, con el
+motor a medio escribir, es infinitamente peor.
+
+**Nota sobre la red**: `pnpm add` necesita descargar `drizzle-orm` una vez. Si no hay red, la
+alternativa es añadir temporalmente al `IO_EXTERNO` del ruleset un paquete que ya esté en el
+lockfile (`vite`, por ejemplo) y repetir el ejercicio con él. Prueba la mecánica del regex
+contra una ruta real de pnpm, que es el 90 % del valor, pero mueve dos variables a la vez:
+úsalo solo como último recurso y déjalo anotado.
+
+#### Gap adicional detectado al revisar el ruleset, y qué hacer con él
+
+`IO_NATIVO` cubre sistema de archivos, red y procesos, pero **no cubre reloj ni aleatoriedad**:
+faltan `crypto`, `timers`, `timers/promises` y `perf_hooks`. `CLAUDE.md` nº1 prohíbe el reloj
+en el mismo aliento que la I/O, y nº9 prohíbe la aleatoriedad incluso con semilla.
+
+- **Ahora, 30 segundos**: añadir esos cuatro a `IO_NATIVO`. Misma regla, mismo test (Caso 4 del
+  guion de QA ya lo cubre sin cambios).
+- **Diferido a la fase 1, con dueño**: `Date.now()`, `new Date()` y `Math.random()` **no son
+  imports**, así que `dependency-cruiser` no puede verlos jamás — ninguna configuración lo
+  arregla. Ese guardrail necesita una regla de Biome (`noRestrictedGlobals` o equivalente) o el
+  test de arquitectura que [05 §6](./05-plan-de-implementacion.md) ya anuncia. Entra en la fase
+  1, que es cuando `packages/temporal` tiene código que proteger, y lo implementa `engine-dev`.
+  **Anotarlo ahora evita cerrar la fase 0 creyendo que el reloj ya está cubierto: no lo está.**
+
 ---
 
 ## 7. Definición de "hecho"
+
+**Revisada el 2026-07-29** tras los dos huecos que destapó el guion de QA. Los puntos 4 y 5
+cambian de naturaleza y aparecen dos nuevos (6 y 8).
 
 La fase 0 está cerrada cuando **todo** esto es cierto y verificable por alguien que no lo
 escribió:
@@ -600,22 +832,40 @@ escribió:
 1. `pnpm install` desde limpio (`rm -rf node_modules && pnpm install --frozen-lockfile`)
    funciona sin intervención manual.
 2. `pnpm verify` pasa en local **y** en CI, sobre `main`.
-3. El run verde muestra los cuatro pasos ejecutados, no saltados.
-4. `pnpm depcruise` reporta rutas de `packages/…` y `apps/…` — **ninguna** ruta de
-   `node_modules/@oa/…`. (Si aparecen, las fronteras no se están evaluando.)
-5. La regla `el-grafo-no-esta-vacio` se satisface en verde: el grafo contiene módulos reales.
-6. La prueba negativa de §6 se ejecutó, CI se puso rojo, la salida nombró
-   `nucleo-no-va-a-apps`, y la evidencia literal está transcrita en §9.
-7. La rama `chore/verificacion-frontera` no existe ni en local ni en remoto.
-8. `security-reviewer` reportó, y todo hallazgo crítico o alto está resuelto o registrado con
-   su motivo.
-9. `docs/qa/fase-0-frontera.md` existe y el guion es repetible por alguien que no estuvo
-   presente.
-10. Los siete paquetes tienen `typecheck` y test de humo pasando, individualmente.
-11. La documentación de §8 está actualizada **en el mismo PR/commit** que cierra la fase.
+3. El run verde muestra los **cinco** pasos ejecutados, no saltados.
+4. ~~Revisión visual de la salida~~ → `pnpm depcruise:cobertura` pasa en verde. La comprobación
+   de que no hay rutas de `node_modules/@oa/…` ya es mecánica (§4.8, aserción 3): nadie tiene
+   que acordarse de mirar.
+5. **El guardrail de cobertura se ha visto fallar.** Reejecutar el Caso 7 del guion de QA
+   (`exclude` que atrapa `packages/engine`) con `depcruise:cobertura` puesto, y comprobar que se
+   pone rojo nombrando `packages/engine/src/index.ts`. Registrar el resultado en el §9 del
+   guion. *Sustituye al antiguo punto 5, que daba por buena una regla `required` que no hacía
+   lo que se le atribuía.*
+6. **La mitad npm de `sin-io-en-nucleo` está demostrada** (§6.bis): con `drizzle-orm` declarado
+   e instalado en `packages/engine`, la salida nombra `sin-io-en-nucleo`. Es lo que valida que
+   el regex simplificado por ReDoS casa con el layout real de pnpm.
+7. La prueba negativa de §6 se ejecutó, CI se puso rojo, la salida nombró
+   `nucleo-no-va-a-apps`, y la evidencia literal está transcrita en §9. **Hecho el 2026-07-29.**
+8. La mitad nativa de la frontera está demostrada: `node:fs/promises` en `packages/engine`
+   dispara `sin-io-nativo-en-nucleo` de forma aislada. **Hecho el 2026-07-29.**
+9. La rama `chore/verificacion-frontera` no existe ni en local ni en remoto. **Hecho.**
+10. `security-reviewer` reportó, y todo hallazgo crítico o alto está resuelto o registrado con
+    su motivo.
+11. `docs/qa/fase-0-frontera.md` existe, el guion es repetible por alguien que no estuvo
+    presente, y su §9 registra las ejecuciones de los puntos 5 y 6.
+12. Los siete paquetes tienen `typecheck` y test de humo pasando, individualmente.
+13. La documentación de §8 está actualizada **en el mismo PR/commit** que cierra la fase.
 
-Un incumplimiento del punto 6 significa que la fase no está hecha, aunque todo lo demás esté
-verde. Es el objetivo declarado de la fase: sin él, la frontera del motor es una intención.
+Los puntos que deciden si la fase está hecha son el **5, 6, 7 y 8**: son las cuatro mitades de
+la única garantía que esta fase entrega. Todo lo demás es andamiaje que se puede rehacer en una
+tarde; esto no, porque nadie vuelve a verificar una frontera que ya cree verificada.
+
+**Lo que esta fase NO garantiza, y conviene decirlo antes de cerrarla:**
+
+- El reloj y la aleatoriedad **no** están cubiertos. `Date.now()` y `Math.random()` no son
+  imports y `dependency-cruiser` no puede verlos. Entra en la fase 1 (§6.bis).
+- `web-solo-contracts` y `apps-no-se-cruzan` están escritas pero **no demostradas**: `apps/web`
+  es un stub sin contenido real hasta la fase 7. Se demuestran cuando haya algo que proteger.
 
 ---
 
@@ -624,7 +874,7 @@ verde. Es el objetivo declarado de la fase: sin él, la frontera del motor es un
 | Documento | Cambio |
 |---|---|
 | `docs/arquitectura/fase-0-ejecucion.md` (este) | Estado → **cerrado**, con fecha. Rellenar §9 con la evidencia. Marcar D1–D5 como ratificadas o modificadas |
-| `docs/arquitectura/adr/ADR-016-…` | **Nuevo**, si se ratifica D1: versión de TypeScript y estrategia frente al compilador nativo. Con el disparador de revisión explícito: *TS 7.1 publicado **y** `dependency-cruiser` con soporte declarado* |
+| [`adr/ADR-016-version-de-typescript.md`](./adr/ADR-016-version-de-typescript.md) | ✅ **Escrito el 2026-07-29.** TypeScript 6.0 en vez del compilador nativo 7.0. Disparador de revisión explícito: *TS 7.1 publicado **y** `dependency-cruiser` con soporte declarado*, las dos condiciones, no una. Índice de ADRs actualizado |
 | `docs/arquitectura/05-plan-de-implementacion.md` | Fase 0 marcada como cerrada, con la fecha y el enlace a la evidencia. Corregir la línea que dice que conviene resolver Q12 antes de cerrarla: ya está resuelta |
 | `docs/arquitectura/07-convenciones-propuestas.md` | Sustituir la nota "versiones y comandos que todavía no existen" por las versiones reales del lockfile |
 | `CLAUDE.md` | **Propuesta, no cambio silencioso.** Sustituir el bloque "Estado del repo" por: versiones confirmadas (§3), decisiones D2/D3 como convención (`nodenext` + extensiones explícitas, `target es2024`), y una tabla de qué comando existe desde qué fase. Y la advertencia de D1: **no instalar `typescript@latest`** |
@@ -683,6 +933,58 @@ con `TS2307`), sin llegar nunca al paso `depcruise`. La regla de frontera quedó
 en esa invocación. Solo `pnpm depcruise` en aislado, y CI con sus pasos separados, producen la
 evidencia. Esto **valida la decisión del §4.6** de no colapsar los cuatro pasos de CI en un
 único `pnpm verify`: si se hubieran colapsado, este run rojo no habría demostrado nada.
+
+### 9.1 Enmiendas del 2026-07-29 — las tres pruebas que faltaban
+
+Las tres nacen de los huecos que detectó [`qa-engineer`](../qa/fase-0-frontera.md) al escribir
+el guion repetible. Ninguna estaba en el procedimiento original.
+
+**Prueba 1 — mitad nativa de la frontera de I/O.** Envenenando `packages/engine/src/index.ts`
+con `import { readFile } from "node:fs/promises"`:
+
+```
+  error sin-io-nativo-en-nucleo: packages/engine/src/index.ts → fs/promises
+x 1 dependency violations (1 errors, 0 warnings). 16 modules, 16 dependencies cruised.
+```
+
+**Prueba 2 — mitad npm de la frontera (§6.bis).** Es la que valida el regex simplificado tras
+el rechazo por ReDoS, que hasta ahora **nunca se había ejecutado contra una ruta resuelta real
+de pnpm**. Con `pnpm --filter @oa/engine add drizzle-orm` y el import envenenado:
+
+```
+  error sin-io-en-nucleo: packages/engine/src/index.ts → node_modules/.pnpm/drizzle-orm@0.45.2/node_modules/drizzle-orm/index.js
+x 1 dependency violations (1 errors, 0 warnings). 16 modules, 16 dependencies cruised.
+```
+
+La ruta real confirma que anclar al **último** segmento `node_modules/` era correcto: el layout
+de pnpm interpone `.pnpm/drizzle-orm@0.45.2/` y un anclaje al primero no habría casado.
+Revertido con `git checkout` + `pnpm install`; verificado que `drizzle-orm` no queda enlazado
+en `packages/engine/node_modules`, ni en su `package.json`, ni en el lockfile.
+
+**Prueba 3 — el guardrail de cobertura, que reemplaza a D5.** Con
+`exclude: { path: "packages/engine" }` en las opciones del ruleset:
+
+```
+  ✖ cobertura del grafo: faltan 1 de 7 puntos de entrada
+
+      El análisis NO está cubriendo estos módulos, así que ninguna regla los protege:
+        - packages/engine/src/index.ts
+
+      Causa habitual: un glob o un `exclude` demasiado amplio en .dependency-cruiser.cjs.
+      Módulos vistos: 13.
+```
+
+Código de salida 1, y nombra el módulo perdido en vez de contarlos. Sobre el árbol sano:
+`✔ cobertura del grafo: los 7 puntos de entrada están analizados (15 módulos vistos)`.
+
+**Contraste con el D5 original, que es el motivo de todo esto.** El mismo `exclude`, con la
+regla `required` `el-grafo-no-esta-vacio` como único guardia, producía:
+
+```
+✔ no dependency violations found (13 modules, 12 dependencies cruised)
+```
+
+Verde limpio. Ese es el fallo que D5 existía para prevenir y no prevenía.
 
 ---
 

@@ -45,3 +45,9 @@ jobs:
 
       - run: pnpm run depcruise
         if: ${{ !cancelled() }}
+
+      # Pregunta distinta a la del paso anterior: `depcruise` responde "¿hay aristas
+      # prohibidas?"; esto responde "¿el análisis mira lo que debe?". Sin él, un
+      # `exclude` demasiado amplio deja CI verde sin proteger nada.
+      - run: pnpm run depcruise:cobertura
+        if: ${{ !cancelled() }}
