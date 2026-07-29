@@ -17,15 +17,25 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    # Las acciones de terceros van ancladas por SHA de commit, no por tag: un tag
+    # puede re-apuntarse sin dejar diff en este repositorio, y ese código se
+    # ejecutaría en el runner en cada push. Hoy el radio es bajo (token de solo
+    # lectura, sin secretos), pero se cierra ahora que es barato: el día que entren
+    # secretos de despliegue o el disparador `pull_request`, el mismo vector pasa a
+    # ser de impacto alto.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          # Ningún paso de este job hace push; sin esto el GITHUB_TOKEN queda
+          # persistido en .git/config del runner el resto del job.
+          persist-credentials: false
 
       # Antes de setup-node: si no, la caché de pnpm no encuentra el gestor.
       # Sin `version:` a propósito — lo lee del campo `packageManager` del
       # package.json, y darle ambos aborta con "multiple versions specified".
-      - uses: pnpm/action-setup@v6.0.5
+      - uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d # v6.0.5
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: pnpm
