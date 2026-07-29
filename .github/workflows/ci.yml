@@ -33,7 +33,7 @@ jobs:
       # Antes de setup-node: si no, la caché de pnpm no encuentra el gestor.
       # Sin `version:` a propósito — lo lee del campo `packageManager` del
       # package.json, y darle ambos aborta con "multiple versions specified".
-      - uses: pnpm/action-setup@8912a9102ac27614460f54aedde9e1e7f9aec20d # v6.0.5
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
