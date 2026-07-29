@@ -1,0 +1,27 @@
+packages:
+  - 'packages/*'
+  - 'apps/*'
+
+# Se rellena con lo que reclame `pnpm install`. Vacío es intencional:
+# ninguna dependencia ejecuta scripts de instalación todavía.
+allowBuilds: []
+
+# Única fuente de verdad de versiones. Los paquetes declaran `catalog:`
+# y no una versión literal, así que no puede haber deriva entre ellos.
+catalog:
+  '@biomejs/biome': 2.5.6
+  dependency-cruiser: ^18.1.0
+  typescript: ^6.0.3
+  vite: ^8.1.5
+  vitest: ^4.1.10
+
+minimumReleaseAgeExclude:
+  - '@biomejs/biome@2.5.6'
+  - '@biomejs/cli-darwin-arm64@2.5.6'
+  - '@biomejs/cli-darwin-x64@2.5.6'
+  - '@biomejs/cli-linux-arm64-musl@2.5.6'
+  - '@biomejs/cli-linux-arm64@2.5.6'
+  - '@biomejs/cli-linux-x64-musl@2.5.6'
+  - '@biomejs/cli-linux-x64@2.5.6'
+  - '@biomejs/cli-win32-arm64@2.5.6'
+  - '@biomejs/cli-win32-x64@2.5.6'

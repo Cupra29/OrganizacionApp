@@ -18,6 +18,7 @@ coverage/
 # Caches
 .turbo/
 .cache/
+*.local
 
 # Memoria de agentes — estado derivado, la fuente de verdad está en docs/arquitectura/
 .claude/agent-memory/
