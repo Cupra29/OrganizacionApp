@@ -132,6 +132,19 @@ La fase de mayor densidad de bugs potenciales por línea de código.
   `pnpm lint` y por tanto a `pnpm verify`. Entra aquí y no antes porque es ahora cuando hay
   código que proteger.
 
+**Orden dentro de la fase, decidido el 2026-07-29:** el guardrail va **primero**, antes de
+`PlanningDay` y de cualquier lógica temporal. La valla se pone antes que las ovejas: escrito al
+final, obliga a limpiar violaciones ya introducidas; escrito al principio, impide introducirlas.
+
+Y una precisión que condiciona el mecanismo: **restringir el global `Date` a secas es demasiado
+grueso**. `new Date(instanteISO)` es legítimo y necesario, igual que `Math.max` y `Math.floor`;
+lo prohibido es `Date.now()`, `new Date()` *sin argumentos* y `Math.random()`. Un guardrail que
+obliga a poner excepciones cada dos archivos deja de ser un guardrail al tercer mes. Si Biome
+2.5.6 no distingue esas formas con precisión —valorar sus plugins GritQL—, es preferible un
+chequeo propio en `pnpm verify`, al estilo de `scripts/verificar-cobertura-grafo.mjs`, que una
+regla estándar que haya que silenciar. Verificar también el caso contrario: que las formas
+legítimas **no** dan falso positivo.
+
 **Dependencia externa:** `@js-temporal/polyfill` o `Temporal` nativo si el runtime lo
 soporta; `rrule` para el subconjunto RFC 5545. **No** `moment`, **no** `date-fns` con zonas:
 la aritmética de zonas necesita una biblioteca que trate instante, fecha civil y zona como
