@@ -1,0 +1,30 @@
+name: Deuda TypeScript 7
+
+# El disparador de ADR-016 depende de dos condiciones externas que nadie va a recordar
+# dentro de seis meses. Esto lo comprueba solo.
+#
+# Un fallo de este workflow NO es una avería: es una tarea. Significa que ya se puede
+# migrar y toca escribir el ADR que reemplace al 016. Va en un workflow aparte para que
+# el estado de CI no se contamine.
+on:
+  schedule:
+    - cron: '0 9 1 * *' # día 1 de cada mes, 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  comprobar:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+
+      # Sin `pnpm install`: el script solo usa `fetch`, que es global en Node 24.
+      - run: node scripts/comprobar-deuda-typescript.mjs

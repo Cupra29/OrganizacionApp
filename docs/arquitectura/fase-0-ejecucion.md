@@ -216,9 +216,8 @@ no detectan la ausencia de un módulo.* Está escrito aquí arriba y en el Caso 
 
 ### No bloqueantes, pero conviene resolverlas pronto
 
-- **Licencia.** El repo es público y el README dice "sin licencia declarada" — por defecto,
-  todos los derechos reservados. Para un SaaS propietario eso probablemente es lo correcto,
-  pero conviene que sea explícito (`LICENSE` o una línea en el README) en vez de un vacío.
+- ~~**Licencia.**~~ **Resuelta el 2026-07-29: MIT**, en `LICENSE` y declarada en el
+  `package.json` raíz. El README ya no dice "sin licencia declarada".
 - **`apps/web` en el `projects` de Vitest.** Cuando la fase 7 traiga React necesitará
   `environment: 'jsdom'`. Hoy no, y no hay que anticiparlo.
 
@@ -876,8 +875,20 @@ tarde; esto no, porque nadie vuelve a verificar una frontera que ya cree verific
 
 - El reloj y la aleatoriedad **no** están cubiertos. `Date.now()` y `Math.random()` no son
   imports y `dependency-cruiser` no puede verlos. Entra en la fase 1 (§6.bis).
-- `web-solo-contracts` y `apps-no-se-cruzan` están escritas pero **no demostradas**: `apps/web`
-  es un stub sin contenido real hasta la fase 7. Se demuestran cuando haya algo que proteger.
+- ~~`web-solo-contracts` y `apps-no-se-cruzan` están escritas pero **no demostradas**~~.
+  **Corregido el 2026-07-29: ambas demostradas.** El argumento de esperar a la fase 7 no se
+  sostenía — `nucleo-no-va-a-apps` se demostró contra stubs igual de vacíos, y una regla se
+  ejercita con una arista prohibida, no con contenido real. Envenenando
+  `apps/web/src/index.ts`:
+
+  ```
+  error web-solo-contracts: apps/web/src/index.ts → packages/engine/src/index.ts
+  error apps-no-se-cruzan:  apps/web/src/index.ts → apps/api/src/index.ts
+  ```
+
+  Importa más de lo que parece: `apps-no-se-cruzan` usa una retrorreferencia `$1` al grupo
+  capturado en su `from`, y esa sintaxis **nunca se había ejecutado**. Era la tercera
+  conjetura sin verificar de la fase, después del regex de `sin-io-en-nucleo` y del guardia D5.
 
 ---
 

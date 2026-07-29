@@ -1,0 +1,19 @@
+version: 2
+
+# Solo `github-actions`, y por una razón concreta: las acciones de ci.yml están
+# ancladas por SHA de commit para que un tag re-apuntado no pueda ejecutar código
+# arbitrario en el runner. El precio de ese anclaje es que un SHA fijo NO recibe
+# nada, tampoco un parche de seguridad. Dependabot es lo que cierra ese hueco:
+# abre PR con el SHA nuevo cuando la acción publica versión.
+#
+# `npm` queda fuera a propósito: con una persona manteniendo esto, el ruido de PRs
+# costaría más de lo que aporta, y `pnpm audit` corre en cada CI.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: 'chore(ci)'
+    labels:
+      - dependencias

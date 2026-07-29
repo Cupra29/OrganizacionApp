@@ -95,4 +95,4 @@ sin proteger nada.
 
 ## Licencia
 
-Sin licencia declarada todavía, lo que por defecto significa *todos los derechos reservados*.
+[MIT](LICENSE).
