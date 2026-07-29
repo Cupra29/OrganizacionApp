@@ -638,21 +638,51 @@ cada agente de las fases 1–9, y hoy contiene comandos que no existen y ninguna
 
 ## 9. Registro de la prueba negativa
 
-> *Pendiente. Lo rellena T6 con lo que reporte T3. No cerrar la fase con esta sección vacía.*
+> **Ejecutada y superada el 2026-07-29.** Las tres comprobaciones del §6 se cumplen.
 
 | Campo | Valor |
 |---|---|
-| Fecha de ejecución | |
-| SHA del commit envenenado | |
-| URL del run rojo | |
-| URL del run verde anterior | |
-| Reglas que saltaron | |
-| Código de salida de `depcruise` | |
-| Rama borrada | |
+| Fecha de ejecución | 2026-07-29 |
+| SHA del commit envenenado | `2bd84f52696e8c710b9c09d0f8ecb55da87bd203` |
+| URL del run rojo | https://github.com/Cupra29/OrganizacionApp/actions/runs/30411377175 |
+| URL del run verde anterior | https://github.com/Cupra29/OrganizacionApp/actions/runs/30411155069 |
+| Reglas que saltaron | `nucleo-no-va-a-apps` (1) y `not-to-unresolvable` (1) |
+| Código de salida de `depcruise` | 2 |
+| Rama borrada | `chore/verificacion-frontera`, sin merge |
+
+Salida literal de `dependency-cruiser` en el run rojo de CI:
 
 ```
-(salida literal de dependency-cruiser, recortada a las violaciones)
+$ depcruise packages apps --config .dependency-cruiser.cjs
+
+  error nucleo-no-va-a-apps: packages/engine/src/index.ts → apps/api/src/index.ts
+  error not-to-unresolvable: packages/engine/src/index.ts → drizzle-orm
+
+x 2 dependency violations (2 errors, 0 warnings). 16 modules, 17 dependencies cruised.
 ```
+
+**Las tres comprobaciones del §6:**
+
+1. **Rojo, con `depcruise` fallando.** Los cuatro pasos se ejecutaron pese a fallar el
+   primero, gracias al `if: ${{ !cancelled() }}`. `depcruise` salió con código 2.
+2. **La salida nombra `nucleo-no-va-a-apps`.** Es la prueba de que la regla de frontera
+   existe y se evalúa, y no un rojo de higiene de dependencias disfrazado.
+3. **El run verde anterior satisfacía `el-grafo-no-esta-vacio`.** Su `depcruise` pasó sobre
+   15 módulos y 15 dependencias, con la regla `required` satisfecha en silencio.
+
+**Atribución de cada import a su regla**, que es el objetivo de envenenar dos y no uno:
+
+| Import | Regla que dispara | Por qué |
+|---|---|---|
+| `drizzle-orm` (el criterio literal de [05](./05-plan-de-implementacion.md)) | `not-to-unresolvable` | El paquete no está instalado, así que nunca resuelve y no llega a evaluarse contra `sin-io-en-nucleo`. **Por sí solo no probaría nada**: un ruleset con la frontera comentada daría el mismo rojo |
+| `../../../apps/api/src/index.ts` | `nucleo-no-va-a-apps` | Ruta relativa: resuelve siempre, así que obliga a la regla de frontera a pronunciarse |
+
+**Hallazgo de la ejecución — `pnpm verify` no basta para validar la frontera.** En local,
+`pnpm verify` encadena con `&&` y **corta en `typecheck`** (el import irresoluble tumba `tsc`
+con `TS2307`), sin llegar nunca al paso `depcruise`. La regla de frontera quedó sin evaluar
+en esa invocación. Solo `pnpm depcruise` en aislado, y CI con sus pasos separados, producen la
+evidencia. Esto **valida la decisión del §4.6** de no colapsar los cuatro pasos de CI en un
+único `pnpm verify`: si se hubieran colapsado, este run rojo no habría demostrado nada.
 
 ---
 
