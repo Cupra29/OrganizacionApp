@@ -422,32 +422,49 @@ comprometida con alguien.
 
 ## Q13 — ¿El turno rotativo real está alineado con la semana civil o no? ✅ Resuelta
 
-> **Respuesta (2026-07-29): DESALINEADO de la semana civil.** **No confirmó el supuesto**, que
-> trataba las dos fixtures como equivalentes y dejaba la de 7 días como caso principal.
+> **Respuesta definitiva (2026-07-30): 2-2-3 con ciclo de 14 días. Enganchado a la semana civil
+> con periodo 2, NO desfasado.** Anclado en lunes: semanas impares `{L,M,V,S,D}`, semanas pares
+> `{X,J}`. Dos patrones que alternan.
+>
+> > **La respuesta registrada el 2026-07-29 decía "desalineado" y era incorrecta — por culpa de
+> > cómo se formuló la pregunta.** Las opciones agrupaban *"desalineado (2-2-3, 8 días…)"*, y esos
+> > dos casos **no pertenecen al mismo grupo**: un ciclo de 8 días deriva un día de la semana por
+> > ciclo y no se repite hasta la semana 9; uno de 14 alterna entre dos patrones fijos y se repite
+> > cada dos semanas. Al elegir esa opción, el usuario respondió con exactitud sobre su turno; la
+> > categoría que se le ofreció era la que estaba mal construida. **Queda registrado porque explica
+> > por qué una respuesta archivada puede no decir lo que parece**, y porque el remedio no es
+> > preguntar mejor la próxima vez sino no meter dos regímenes distintos bajo una etiqueta.
+> >
+> > **El número que habría evitado el error:** el periodo en semanas de un ciclo de `L` días es
+> > `L / mcd(L, 7)`. `L=7 → 1` · `L=8 → 8` · `L=14 → 2` · `L=28 → 4`. "Alineado o no" no es la
+> > pregunta útil; el periodo sí.
 >
 > **Consecuencias, en orden de importancia:**
 >
-> 1. **La fixture representativa pasa a ser la de ciclo desalineado**; la de 4×3 (7 días) se queda
->    como el caso que nombra el brief, no como el caso de referencia.
-> 2. **La demo de la fase 3 cambia de patrón.** Decía "fixture de enfermera con turnos 4×3", que
->    es el patrón alineado: habría enseñado ocho semanas idénticas, es decir algo que un
->    calendario semanal ordinario también sabe enseñar. Siendo la **primera recompensa visible**
->    del proyecto, enseñar precisamente lo que no nos distingue era el peor error posible ahí.
->    Corregido en [05](./05-plan-de-implementacion.md).
-> 3. **La justificación de `CYCLE` en [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md) deja
->    de apoyarse en un caso hipotético.** El ADR descarta "solo RRULE" porque los turnos con
->    *"ciclo desfasado de la semana civil"* exigirían reglas artificiales con offsets calculados;
->    hasta hoy el único ejemplo desalineado del documento era el 2-2-3, que nadie había
->    confirmado. Ahora hay un caso real. **Ninguna decisión cambia**, así que se anota como nota
->    fechada dentro del ADR y no con un ADR de reemplazo — mismo mecanismo que la confirmación de
->    disponibilidad en ADR-001.
+> 1. **El 2-2-3 de 14 días entra como fixture de la fase 1**, porque es el turno real y porque su
+>    régimen —periodo 2— no lo cubría ninguna de las dos que había. Trae además una trampa propia:
+>    14 es múltiplo de 7, así que una implementación que redujera el ciclo módulo 7 lo colapsaría a
+>    un patrón semanal y produciría un resultado **equivocado pero plausible**.
+> 2. **La demo de la fase 3 la sostiene el 2-2-3**, que es el turno real. Su afirmación pasa a ser
+>    "la semana A y la semana B no dan las mismas horas asignables", no "ocho semanas distintas".
+>    La redacción que ya tenía —*"cada semana, que no son las mismas dos semanas seguidas"*— sigue
+>    siendo literalmente cierta con periodo 2.
+> 3. **La fixture de 8 días se queda donde estaba**, cargando la aserción de ocho semanas distintas
+>    más el falsificador de la novena, y **explícitamente como elección de prueba y no como dato de
+>    nadie**. Escribirla así el 2026-07-29, cuando el dato no existía, es lo que hace que hoy no
+>    haya que tocarla.
+> 4. **La justificación de `CYCLE` se confirma, pero por la cláusula ergonómica y no por la de
+>    desfase.** El 2-2-3 **sí** es expresable como dos `RRULE` con `INTERVAL=2` ancladas en semanas
+>    distintas, así que no es un problema de expresividad. Lo que ADR-005 dice de verdad es que
+>    exigiría *"varias reglas coordinadas con offsets calculados que el usuario no podría entender
+>    ni editar"*, y nombra el **2-2-3 de 14 días como "directamente hostil"** desde el 2026-07-24.
+>    Ese caso resultó ser el turno real. **Ninguna decisión cambia**: nota fechada dentro del ADR,
+>    no ADR de reemplazo — mismo mecanismo que la confirmación de disponibilidad en ADR-001.
 >
-> **Lo que la respuesta NO fija: la longitud exacta del ciclo.** La opción elegida agrupaba varios
-> patrones ("2-2-3, 8 días…"), así que está confirmado el *hecho* (desalineado) y no el *número*.
-> Los criterios de aceptación de las fases 1 y 3 usan 8 días porque es el ciclo con el que la
-> aserción es más fuerte —periodo de exactamente 8 semanas, así que las ocho salen distintas y la
-> novena repite la primera— no porque sea el turno de nadie. **Si la fixture tiene que retratar un
-> turno real, falta ese dato**; está anotado como tal en el reporte y en la fase 3.
+> **Lo que hay que retener de este episodio.** Lo que refuta la semana plantilla
+> ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3) es **periodo ≥ 2**, no la
+> deriva. El 2-2-3 del usuario ya la refuta. La respuesta del 2026-07-29 llegó a la conclusión
+> correcta —la fixture de 4×3, con periodo 1, no servía— por un camino equivocado.
 
 **Por qué importaba.** Al contrastar los candidatos de expansión contra el criterio de aceptación
 de la fase 1 apareció que ese criterio era **insatisfacible**: pedía que un 4×3 produjera semanas
@@ -463,6 +480,9 @@ Lo que no puedo decidir yo es **cuál de las dos es la fixture representativa**,
    `CYCLE` por *"ciclo desfasado de la semana civil"*. Sigue siendo cierta para el 2-2-3 de 14
    días que el mismo ADR nombra, así que **la decisión no está en riesgo**; pero el ejemplo con el
    que se ilustra sí es engañoso.
+   *(⚠ Esta frase, escrita al abrir la pregunta, es falsa: un ciclo de 14 días **no** está
+   desfasado de la semana civil, tiene periodo 2. La decisión efectivamente no está en riesgo,
+   pero por el argumento ergonómico. Ver la respuesta de arriba, punto 4.)*
 
 **Supuesto actual.** Se implementan y prueban **las dos**: la de 7 días porque es el caso que
 nombra el brief, y la de 8 porque es la que carga la aserción de semanas distintas. Coste de
@@ -531,7 +551,7 @@ validado. Barato de decidir ahora, caro de descubrir en la fase 6 con la entrevi
 
 | | Respuesta | ¿Confirmó el supuesto? |
 |---|---|---|
-| **Q13** | Turno rotativo **desalineado** de la semana civil | **No** — cambia la fixture representativa y el patrón de la demo de la fase 3 |
+| **Q13** | **2-2-3, ciclo de 14 días, periodo 2 semanas** (dato exacto el 2026-07-30) | **No**, y con un giro: la respuesta registrada el 29 decía "desalineado" y el dato la desmintió. La **pregunta** estaba mal agrupada |
 | Q14 | Sin `BYDAY` posicional | Sí — ADR-018 §3 se mantiene, la fase 1 no crece |
 
 ## Las 14, y qué dejaron
@@ -544,7 +564,7 @@ De las 14, **cinco no confirmaron el supuesto** y cada una dejó rastro en el di
 | Q8 | Tres tablas dejaron de persistir narrativas redactadas → [ADR-014] |
 | Q6 | Fricción conservadora → [ADR-015] |
 | Q6 (efecto colateral) | **Corrigió una afirmación falsa de Q5** sobre el tope emergente |
-| Q13 | La fixture representativa del turno rotativo pasa a ser un ciclo desalineado, y con ella el patrón de la demo de la fase 3 |
+| Q13 | Entra el 2-2-3 de 14 días como fixture y como demo de la fase 3. Y deja una lección sobre las preguntas: **agrupar dos regímenes distintos bajo una etiqueta produce una respuesta exacta a una categoría equivocada** |
 
 Ese último es el argumento a favor de haber escrito este documento: la pregunta que parecía
 menor —unos parámetros numéricos— fue la que obligó a correr los números y destapó que un

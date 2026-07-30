@@ -17,10 +17,17 @@ antes de escribir una línea de código.
 ### Axioma 1 — La semana no existe como estructura
 
 No hay tabla `weeks`, ni `weekly_template`, ni columna `day_of_week` como eje del modelo. La
-semana es una **ventana de consulta**, nunca una entidad. Un turno rotativo 4×3 tiene ciclo
-de 7 días pero desfasado respecto a la semana civil; una rotación 2-2-3 tiene ciclo de 14. Un
-modelo con "semana plantilla" hace estos casos irrepresentables y es exactamente lo que el
-brief prohíbe.
+semana es una **ventana de consulta**, nunca una entidad. Una rotación **2-2-3 tiene ciclo de 14
+días**, que no cabe en una semana plantilla: alterna entre dos patrones civiles distintos. Un turno
+**4×3 tiene ciclo de 7** y sí encaja en una semana; es el único de los casos del brief que lo hace.
+Un modelo con "semana plantilla" deja irrepresentable todo lo que no tenga **periodo 1**, y eso es
+exactamente lo que el brief prohíbe.
+
+> **Corregido el 2026-07-30.** Este párrafo describía el 4×3 como *"ciclo de 7 días pero desfasado
+> respecto a la semana civil"*. **No lo está**: 4 + 3 = 7, así que se repite idéntico cada semana
+> con cualquier ancla. El error venía de [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md), que
+> lo arrastra en su contexto y que **no se edita**; queda anotado allí. Lo que hace falta para
+> refutar la semana plantilla es **periodo ≥ 2**, siendo el periodo en semanas `L / mcd(L, 7)`.
 
 ### Axioma 2 — La unidad de planificación es la jornada, no el día calendario
 
@@ -253,12 +260,15 @@ imposibles de editar en una interfaz. El generador `CYCLE` lo dice directamente:
 > los días activos se derivan de `shifts`. La forma canónica es la de
 > [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md) §1, que nunca tuvo `onDays`.
 >
-> **Ojo con este ejemplo como fixture de prueba:** un 4×3 es un ciclo de **7 días**, así que está
-> alineado con la semana civil y produce semanas idénticas. No sirve para demostrar que el modelo
-> no es una semana plantilla; para eso hace falta un ciclo no múltiplo de 7. **Q13, resuelta el
-> 2026-07-29, confirmó que el turno real está desalineado de la semana civil**, así que la fixture
-> representativa es una de ciclo no múltiplo de 7 y esta queda como el caso que nombra el brief.
-> Ver el criterio corregido de la fase 1 en [05](./05-plan-de-implementacion.md).
+> **Ojo con este ejemplo como fixture de prueba:** un 4×3 es un ciclo de **7 días**, así que
+> produce semanas civiles idénticas y **no sirve** para demostrar que el modelo no es una semana
+> plantilla. Lo que hace falta para eso es **periodo ≥ 2**, y el periodo en semanas de un ciclo de
+> `L` días es `L / mcd(L, 7)`: `L=7 → 1`, `L=14 → 2`, `L=8 → 8`.
+>
+> **El turno real del usuario es un 2-2-3 de 14 días** (Q13, dato exacto el 2026-07-30): periodo 2,
+> dos patrones civiles que alternan. **No** está desfasado de la semana civil — una nota anterior
+> de este documento decía que sí y era falsa. Ver el criterio de la fase 1 en
+> [05](./05-plan-de-implementacion.md), que lleva las tres fixtures, una por régimen.
 
 `effective_from` y `effective_until` son columnas `date` sin zona, y [ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md)
 prohíbe una fecha civil sin zona: **se interpretan en `recurrence_rules.timezone`**, que está en
