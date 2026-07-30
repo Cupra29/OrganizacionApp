@@ -49,7 +49,7 @@ Llegan en su fase y **no antes**: `test:integration` y `db:generate`/`db:migrate
 Todas las versiones viven en el `catalog:` de `pnpm-workspace.yaml`. No las cambies sin decirlo.
 
 Node **24** · pnpm **11.17.0** · TypeScript **6.0.x** · Vitest **4** · Biome **2.5.6** ·
-dependency-cruiser **18**
+dependency-cruiser **18** · temporal-polyfill **1.0.2**
 
 - **No instales `typescript@latest`.** Hoy resuelve a 7.x, que no publica API programática y
   con el que `dependency-cruiser` no funciona: se perdería la frontera del motor entera. Ver
@@ -60,6 +60,10 @@ dependency-cruiser **18**
 - **`target`/`lib` es `es2024`, no `es2025`.** Es deliberado: `es2025` traería los tipos de
   `Temporal` al ámbito global y Node 24 no lo implementa sin flag, así que compilaría y
   reventaría en ejecución. Si necesitas `Temporal`, impórtalo explícitamente del polyfill.
+- **`Temporal` se importa desde `@oa/temporal`**, que lo reexporta desde su único módulo
+  `src/temporal.ts`. **Ningún otro archivo importa el polyfill.** Es lo que hace que cambiar de
+  polyfill sea una línea, y `temporal-polyfill` se eligió sabiendo que no es el de los
+  champions. Ver ADR-018.
 
 ## Dónde vive la documentación
 
@@ -81,6 +85,10 @@ dependency-cruiser **18**
    `packages/ical`, que no es I/O-libre por la misma razón sino porque su salida debe ser
    reproducible byte a byte (ADR-017). Que cada guardrail siga mirando lo que debe lo
    verifican `depcruise:cobertura` y `guardrail:cobertura`.
+   **Falta una tercera puerta, y hoy la sostienes tú:** adoptar `Temporal` (ADR-018) trae
+   `Temporal.Now`, que lee reloj y zona ambiente a la vez, y el plugin todavía no lo ve.
+   Tampoco ve `Intl.DateTimeFormat().resolvedOptions().timeZone` ni `performance.now`.
+   Mecanizarlo es entrega de la fase 1, dueño `engine-dev`.
 2. El validador del motor **no importa nada del módulo de colocación**. La duplicación es
    deliberada: si compartieran utilidades, la validación sería una tautología.
 3. **Ningún campo que registre, insinúe o permita inferir información médica.** Las
@@ -121,6 +129,12 @@ motivacional, ni rellenar cada minuto disponible del día.
 - Un plan imposible **no es un error**: es `200 OK` con `feasibility: "INFEASIBLE"`.
 - Los instantes del `.ics` (`DTSTAMP`, `CREATED`, `LAST-MODIFIED`) salen de la versión del
   plan, **nunca del reloj**. Ver ADR-017.
+- Políticas de expansión de recurrencia, elegidas y no heredadas (ADR-018): `disambiguation:
+  'compatible'` ante horas de pared inexistentes o ambiguas; las duraciones son minutos
+  **reales** sobre la línea de instantes, no hora de pared, así que un bloque que contiene un
+  cambio de horario dura lo que dura; `WKST=MO` en toda expansión, y `week_starts_on` es
+  **pura presentación** — no llega nunca al expansor, porque haría que *qué instancias existen*
+  dependiera de un ajuste de visualización.
 
 ## Git
 
