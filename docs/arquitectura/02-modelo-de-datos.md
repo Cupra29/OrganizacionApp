@@ -327,7 +327,11 @@ Tres campos merecen justificación:
 - **`energy_cost` + `drains_after_minutes`** implementan la variante "persona que imparte
   clases": un bloque `HIGH` con arrastre de 90 min degrada a `LOW` la energía de los 90
   minutos siguientes, así que el motor no colocará trabajo profundo justo después. Sin esto,
-  la variante es indistinguible de una reunión cualquiera.
+  la variante es indistinguible de una reunión cualquiera. **`LOW` es un suelo, no un
+  decremento** (confirmado el 2026-07-29 al resolver la composición del arrastre): dos clases con
+  ventanas de arrastre solapadas dejan el tiempo en `LOW`, igual que una sola. El campo expresa
+  **cuánto dura** el arrastre, no su profundidad, así que no hay con qué medir "agota más". Ver
+  [03 §3.2](./03-motor-de-planificacion.md).
 - **`anchor`** resuelve el viaje, con **marcado explícito del usuario** (Q2, resuelta el
   2026-07-27): una clase en línea es `FIXED_ZONE` (sigue a las 09:00 de Ciudad de México
   aunque el usuario esté en Madrid); una rutina propia es `LOCAL_WHEREVER`; **el turno
