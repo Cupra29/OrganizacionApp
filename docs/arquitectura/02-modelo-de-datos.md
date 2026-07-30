@@ -240,13 +240,29 @@ imposibles de editar en una interfaz. El generador `CYCLE` lo dice directamente:
 // cycle_pattern para un turno 4x3 con anclaje explícito
 {
   "cycleLengthDays": 7,
-  "onDays": [0, 1, 2, 3],          // offsets desde anchor_date
   "shifts": [
     { "dayOffsets": [0,1], "startLocal": "07:00", "durationMinutes": 720 },
     { "dayOffsets": [2,3], "startLocal": "19:00", "durationMinutes": 720 }
   ]
 }
 ```
+
+> **Corregido el 2026-07-29.** Este ejemplo llevaba además `"onDays": [0,1,2,3]`, que es la
+> **unión de los `dayOffsets` de los turnos**: dos fuentes de verdad para el mismo hecho, que
+> pueden discrepar y que obligarían al esquema Zod de la fase 2 a decidir cuál gana. Se elimina;
+> los días activos se derivan de `shifts`. La forma canónica es la de
+> [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md) §1, que nunca tuvo `onDays`.
+>
+> **Ojo con este ejemplo como fixture de prueba:** un 4×3 es un ciclo de **7 días**, así que está
+> alineado con la semana civil y produce semanas idénticas. No sirve para demostrar que el modelo
+> no es una semana plantilla; para eso hace falta un ciclo no múltiplo de 7. Ver el criterio
+> corregido de la fase 1 en [05](./05-plan-de-implementacion.md) y **Q13**.
+
+`effective_from` y `effective_until` son columnas `date` sin zona, y [ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md)
+prohíbe una fecha civil sin zona: **se interpretan en `recurrence_rules.timezone`**, que está en
+la misma fila, y `effective_until` es inclusiva hasta el fin de esa jornada civil en esa zona. Si
+la regla trae además `UNTIL`, la expansión aplica la **intersección** de ambos límites
+([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md) §4).
 
 Al exportar a `.ics`, `CYCLE` se **materializa como eventos individuales** en vez de forzarlo
 a RRULE. Es la traducción honesta. Ver [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md).

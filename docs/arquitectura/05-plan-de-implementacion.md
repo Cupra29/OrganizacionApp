@@ -121,9 +121,21 @@ La fase de mayor densidad de bugs potenciales por línea de código.
 - `PlanningDay`: construcción de jornadas `[wake, nextWake)` desde perfil + excepciones.
 - Aritmética del sueño cruzando medianoche.
 - Álgebra de intervalos: unión, resta, solape, huecos.
-- Expansión de recurrencia: generador `RRULE` (subconjunto RFC 5545) y generador `CYCLE`.
-- Aplicación de excepciones ancladas por instante original.
-- Resolución de zona horaria con `timezone_overrides` y `anchor`.
+- Expansión de recurrencia **en dos etapas separadas** ([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md)):
+  - **Etapa 1 — conjunto de fechas**: `(regla, ventana) => PlainDate[]`. Sin zonas, sin
+    instantes, sin horario de verano. `RRULE` y `CYCLE` son dos implementaciones de esta misma
+    firma, así que los dos caminos de código que [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md)
+    admitía como coste son ambos triviales de fixturar.
+  - **Etapa 2 — resolución a instantes**: `(fecha, start_local, zona efectiva, anchor,
+    overrides) => intervalo absoluto`. **El único sitio del paquete donde existe una zona
+    horaria**, compartido por los dos generadores: la aritmética de cambio de horario se prueba
+    una vez, no dos.
+- Aplicación de excepciones ancladas por instante original, con **reporte de las que no casan
+  con ninguna instancia** — nunca descarte silencioso (ADR-018 §7).
+- Resolución de zona horaria con `timezone_overrides` y `anchor` (los tres valores).
+- Validador del subconjunto `RRULE`: acepta la tabla de ADR-018 §3 y **rechaza con error
+  explícito** todo lo demás, incluido `BYDAY` con prefijo numérico y `BYDAY` con
+  `MONTHLY`/`YEARLY`.
 - **Guardrail de reloj y aleatoriedad — heredado de la fase 0, dueño: `engine-dev`.**
   ✅ **entregado el 2026-07-29.** La fase 0 dejó mecanizada la prohibición de I/O en el núcleo,
   pero **solo cubre imports**. `Date.now()`, `new Date()` sin argumentos y `Math.random()` son
@@ -169,15 +181,72 @@ sean **exactamente** las prohibidas: verifica las dos direcciones, incluida la a
 falsos positivos. Es el mismo papel que `depcruise:cobertura` cumple para el grafo, y responde a
 la lección de la fase 0 — un guardrail que no se ha visto fallar es una intención.
 
-**Dependencia externa:** `@js-temporal/polyfill` o `Temporal` nativo si el runtime lo
-soporta; `rrule` para el subconjunto RFC 5545. **No** `moment`, **no** `date-fns` con zonas:
-la aritmética de zonas necesita una biblioteca que trate instante, fecha civil y zona como
-tipos distintos, que es justamente lo que evita la clase entera de errores de medianoche.
+**Ampliación pendiente, descubierta el 2026-07-29 al decidir la dependencia temporal
+([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md) §9). Dueño: `engine-dev`.** Los
+cuatro patrones actuales no ven `Temporal.Now`, y `Temporal.Now.zonedDateTimeISO()` /
+`Temporal.Now.timeZoneId()` leen **el reloj y la zona ambiente a la vez** — el peor de los dos
+mundos, y el camino de menor resistencia para cualquiera que escriba aritmética temporal. La
+puerta se abre en el commit en que `packages/temporal` importe `Temporal`, es decir el siguiente.
+Hay que añadir al plugin: `Temporal.Now` (cualquier miembro),
+`Intl.DateTimeFormat().resolvedOptions().timeZone` y `performance.now`. La zona ambiente entra con
+el mismo argumento que el reloj: en el núcleo es siempre un parámetro. El alcance de paquetes no
+cambia, y los canarios de `guardrail:cobertura` crecen con las formas nuevas.
+
+**Dependencia externa — decidida el 2026-07-29, ver
+[ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md).** Este párrafo nombraba `rrule` y
+se contradecía: rechazaba `date-fns` con zonas porque *"la aritmética de zonas necesita una
+biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rrule` **devuelve
+`Date`**, que es precisamente el tipo que no los distingue. Como queda:
+
+- **Una sola dependencia de producción: `temporal-polyfill@1.0.2`**, importada en un **único
+  módulo** (`packages/temporal/src/temporal.ts`) que reexporta `Temporal`. No
+  `@js-temporal/polyfill`: sigue en `0.5.1` (publicada el 2025-03-31, anterior al Stage 4 de
+  Temporal de marzo de 2026) y arrastra `jsbi`. El módulo único hace que cambiar de polyfill, o
+  pasar a `Temporal` nativo cuando llegue al LTS, sea una línea.
+- **Ninguna biblioteca de recurrencia en producción.** El subconjunto son cinco propiedades
+  (ADR-005 §1), `CYCLE` es código propio de todos modos, y lo que una biblioteca de `RRULE`
+  aportaría está confinado a la etapa 1, que es la mitad **sin** dificultad horaria. `rrule`
+  además introduce una frontera `Date`↔`Temporal` cuya corrección depende de `process.env.TZ`:
+  invisible para `dependency-cruiser` (no hay import), invisible para el guardrail
+  (`new Date(argumento)` está permitido a propósito) y **enmascarada por un CI en UTC**.
+- **`rrule-temporal@2.0.2` como `devDependency`: oráculo diferencial.** Es una segunda
+  implementación independiente contra la que comparar el conjunto de fechas, incluidas semanas de
+  cambio de horario. Así se compran los veinte años de casos límite del ecosistema sin poner una
+  biblioteca en el camino de producción. Fuera de producción porque hoy, en Node 24, empaqueta su
+  **propia** copia de `Temporal` y sus objetos no interoperan con los nuestros.
+- Sigue en pie: **no** `moment`, **no** `date-fns` con zonas.
 
 **Criterio de aceptación**
-- Un turno rotativo 4×3 anclado el 2026-08-03 expande correctamente 8 semanas, y las semanas
-  civiles resultantes **son distintas entre sí**.
+- Un turno rotativo **4×3** (ciclo de 7 días) anclado el 2026-08-03 expande correctamente 8
+  semanas.
+- Un turno rotativo de **ciclo de 8 días** (4 de trabajo / 4 de descanso) anclado el 2026-08-03
+  expande 8 semanas civiles **distintas entre sí**, y la **semana 9 vuelve a ser igual que la 1**.
+
+  > **Corregido el 2026-07-29** al contrastar los candidatos de expansión contra este criterio
+  > ([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md)). El criterio pedía semanas
+  > civiles distintas **de un 4×3, y eso es insatisfacible**: 4 + 3 = 7, así que el ciclo está
+  > alineado con la semana civil y las ocho semanas salen **idénticas** con cualquier ancla. La
+  > fixture de ADR-005 y [02 §4.1](./02-modelo-de-datos.md) usa `cycleLengthDays: 7` y por tanto
+  > nunca habría podido pasar. Lo que el criterio quería probar —que el modelo **no** es una
+  > semana plantilla ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3)—
+  > necesita un ciclo no múltiplo de 7. Con 8 días, el patrón avanza un día de la semana por
+  > ciclo y el periodo es exactamente 8 semanas: se obtienen las ocho distintas **y** un
+  > falsificador (la 9ª repite la 1ª) que un expansor que devuelva ruido no puede satisfacer.
+  > Se conservan las dos fixtures: la de 7 días es el caso que nombra el brief, la de 8 es la que
+  > carga la aserción. Ambas empiezan en 2026-08-03, que es lunes.
 - Una jornada que cruza un cambio de horario mide 23 h o 25 h reales, no 24.
+- Un turno de 720 min que empieza a las 19:00 el día del cambio de horario **termina a otra hora
+  local** ese día: la duración son minutos reales sobre la línea de instantes, no hora de pared
+  (ADR-018 §4).
+- Una regla `FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR` anclada en miércoles produce el conjunto
+  correcto: las semanas activas se cuentan **desde la semana del ancla** con `WKST=MO`, no
+  sumando 14 días a cada ocurrencia, y `COUNT` cuenta el conjunto fusionado en orden. Son los dos
+  errores clásicos de una implementación propia (ADR-018 §5) y los dos casos donde el oráculo
+  diferencial gana su sitio.
+- Una regla a las 02:30 local en un día de adelanto de reloj resuelve a 03:30 y no falla
+  (`disambiguation: 'compatible'`); en un día de atraso toma la **primera** de las dos.
+- El validador **rechaza** `BYSETPOS`, `BYMONTHDAY`, `WKST`, `BYDAY` con prefijo numérico y
+  `FREQ=MONTHLY;BYDAY=MO`, cada uno con un error que nombra la propiedad.
 - Un cronotipo con pico 22:00–01:00 produce una franja `PEAK` contigua que atraviesa
   medianoche, sin partirse en dos.
 - Una excepción creada antes de un cambio de horario sigue apuntando a la instancia correcta
