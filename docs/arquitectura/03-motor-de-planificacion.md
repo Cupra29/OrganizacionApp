@@ -107,9 +107,23 @@ función construirJornadas(ventana, perfil, excepcionesDia, overridesZona):
         wakeSig = instante(d+1,  excepcionDe(d+1)?.wakeLocal ?? perfil.defaultWakeLocal, zonaSig)
         sleep   = instante(d,    excepcionDe(d)?.sleepLocal ?? perfil.defaultSleepLocal, zona)
         si sleep <= wake:  sleep = sleep + 1 día     // cruza medianoche: caso NORMAL
-        jornadas.push({ id: índice, wake, sleep, wakeSig,
+
+        // PRECONDICIÓN. Solo la viola un salto de huso hacia el este de más de 24 h dentro de
+        // una jornada (existe: Pacific/Midway -11 -> Pacific/Kiritimati +14 son 25 h). Una
+        // jornada de duración negativa rompe el embaldosado, así que se REPORTA y no se emite
+        // en silencio. Qué hace el motor con ella se decide en la fase 3, con el caso delante.
+        si wakeSig <= wake:  reportar JornadaDegenerada(d, wake, wakeSig);  continuar
+
+        // ACOTADO AL FIN DE LA JORNADA. `sleep` es una hora local de la zona de `d`, y `wakeSig`
+        // puede estar en OTRA zona: viajando al este, la hora de acostarse puede caer DESPUÉS
+        // del despertar siguiente. Sin este `min`, el intervalo [wake, sleep) se sale de la
+        // jornada e invade la siguiente, y `brutoAsignable` cuenta esos minutos DOS VECES.
+        recorteVigilia = max(0, sleep - wakeSig)      // 0 en toda jornada que no cruza husos
+        sleep          = min(sleep, wakeSig)
+
+        jornadas.push({ id: índice, wake, sleep, wakeSig, recorteVigilia,
                         vigilia:  sleep - wake,      // duración REAL, tolera DST
-                        sueño:    wakeSig - sleep })
+                        sueño:    wakeSig - sleep }) // >= 0 SIEMPRE, por el acotado
     devolver jornadas
 ```
 
@@ -117,6 +131,21 @@ Todo el manejo de medianoche vive en la línea `si sleep <= wake`. A partir de a
 otra parte del motor vuelve a razonar sobre horas locales: opera con instantes absolutos.
 Ese confinamiento es intencional — es la única forma de que los bugs de medianoche no se
 repartan por todo el código.
+
+**`zonaEfectivaEn(d, …)` cruza una fecha civil con intervalos de instantes por el inicio del día
+civil `d` en la zona base** (fijado el 2026-07-30; antes no estaba definido y es exactamente la
+clase de detalle que se reinventa distinto en cada fase). `timezone_overrides.during` es un
+`tstzrange` y `d` es una fecha civil: hace falta un instante para preguntar, y ese instante es el
+comienzo de `d` en `perfil.baseTimezone`.
+
+Por qué ese y no otro: es lo único que hace `zonaEfectivaEn` **función pura de `d`**, y de ahí sale
+el embaldosado. Si el instante de consulta dependiera de `wake` —que es lo intuitivo— habría una
+circularidad: `wake` necesita la zona y la zona necesitaría `wake`. Y como `wakeSig` de la jornada
+`d` se resuelve con `zonaEfectivaEn(d+1)`, que es literalmente la misma llamada que hará `wake` de
+la jornada `d+1`, las dos coinciden por construcción y no por cuidado. **Coste aceptado:** un
+override que empieza a mediodía se aplica desde el comienzo del día civil, así que se adelanta unas
+horas. Es el mismo residuo de la frontera dentro de la jornada, y se paga una vez aquí en vez de
+esparcido.
 
 > **Corregido el 2026-07-29: `zonaSig`.** Este pseudocódigo calculaba `wakeSig` con la zona
 > efectiva en `d`, no en `d+1`. Con un viaje que empieza en `d+1`, el `wakeSig` de la jornada `d`
@@ -138,6 +167,56 @@ repartan por todo el código.
 > La property test lo señalará el día que aparezca una fixture así, que es la forma correcta de
 > encontrarlo.
 
+> **Resuelto el 2026-07-30 el residuo transmeridiano, y no era un problema de reporte: era un
+> doble conteo de capacidad.** Al implementar la etapa 2 (`c718e06`) apareció con fixture delante
+> que `sleep < wakeSig` **es falsa**, y no por un bug: con un override hacia el **este** que empieza
+> en `d+1`, la jornada de `d` pierde tantos minutos como salte el offset. México → Madrid (8 h) con
+> sueño de 8 h da `sueño = 0`; México → Lord Howe (17 h) lo daba **negativo**. Los tres instantes
+> son correctos y el embaldosado se mantiene: la noche se comprime **de verdad**, porque volar al
+> este acorta el día.
+>
+> **Lo que estaba roto no era el signo del sueño, sino la vigilia.** Con un salto de 17 h la
+> jornada dura 7 h y la vigilia declarada son 16 h: el intervalo `[wake, sleep)` —que es
+> exactamente lo que §3.2 resta para obtener los huecos— **se salía de la jornada y se solapaba con
+> la siguiente**. Las dos jornadas reclamaban los mismos minutos y `brutoAsignable` los sumaba dos
+> veces. Un `sueñoMinutes` negativo era el síntoma visible de un solape invisible.
+>
+> **Por eso `sleep = min(sleep, wakeSig)` no es una preferencia, es una necesidad estructural**, y
+> por eso el acotado va en la construcción de la jornada y no en `calcularHuecos`: la invariante
+> "una jornada no reclama minutos de otra" pertenece a la jornada. Con el acotado, `sueño ≥ 0`
+> siempre y la propiedad correcta pasa a ser **`wake < sleep <= wakeSig`**, con `<=`. La igualdad
+> es el caso real de la noche perdida.
+>
+> **El dato no se pierde: se conserva como `recorteVigilia`**, los minutos de vigilia declarada que
+> no cupieron en la jornada. Vale 0 en absolutamente toda jornada que no cruce un salto de huso, y
+> es lo único que permite a F2 distinguir *"dormiste 4 h porque te acostaste tarde"* de *"tu
+> jornada se acortó 9 h al cruzar husos"*. Sin ese número, las dos situaciones son el mismo
+> `sueño` bajo y la explicación al usuario sería falsa. Es un campo **derivado**, no una entrada:
+> no toca el esquema, ni la API, ni la superficie de privacidad.
+>
+> **No es `INFEASIBLE`, y conviene decir por qué**, porque la tentación es fuerte. §3.1 dice que si
+> un deadline solo cabe sacrificando sueño el resultado correcto es `INFEASIBLE`, pero eso
+> gobierna lo que **el motor** puede hacer: el motor no compra tiempo quitando sueño. Aquí nadie
+> sacrifica nada — el usuario cogió un vuelo. Declarar imposible un plan de 14 días porque una de
+> sus jornadas es un viaje transatlántico sería negarse a planificar por un hecho ordinario, y la
+> regla nº6 existe para lo contrario: para no callar cuando algo **de verdad** no cabe.
+>
+> **Sí es el caso extremo de `SLEEP_DEBT`, y la maquinaria ya está.** `déficitSueño = sleepNeed` al
+> ser `sueño = 0` dispara `prohibeFocoNocturno` y `techoEnergía`, que es exactamente el
+> comportamiento correcto para el día de un vuelo nocturno: nada de trabajo profundo, nada alcanza
+> `PEAK`. Cero maquinaria nueva.
+>
+> **Lo que queda para la fase 3, nombrado para que sea elección y no descubrimiento:** (a) si F2
+> emite un `Finding` distinto o reutiliza `SLEEP_DEBT` con `recorteVigilia` en la evidencia — la
+> segunda es más barata y basta si la interfaz sabe redactar dos plantillas; (b) si un `techo` de
+> `NEUTRAL` es suficiente para una jornada de sueño cero o debería ser `LOW`, que es calibración y
+> no estructura; (c) qué hace el motor con una `JornadaDegenerada`. Ninguna de las tres bloquea la
+> fase 1.
+>
+> **Viajando al oeste no hay nada que arreglar**: la jornada se alarga y `sueño` crece. La vigilia
+> no cambia, así que la capacidad tampoco. Un `sueño` de 16 h no es lo que hace un cuerpo, pero es
+> tiempo que no se planifica, y sobreestimar el descanso no produce ningún plan malo.
+
 **Aritmética del sueño como restricción dura:**
 
 ```
@@ -145,8 +224,17 @@ déficitSueño(j) = max(0, perfil.sleepNeedMinutes − duración(j.sueño))
 si déficitSueño(j) > 0:
     j.prohibeFocoNocturno = true          // sin bloques de foco en el último tramo
     j.techoEnergía = NEUTRAL              // nada alcanza PEAK ese día
-    emitir Finding SLEEP_DEBT con evidencia { requerido, real, déficit }
+// El Finding NO nace aquí: la Jornada lleva la evidencia y lo emite F2 (§4).
 ```
+
+**Dónde nace el `Finding SLEEP_DEBT`** (precisado el 2026-07-30). Este bloque decía *"emitir
+Finding SLEEP_DEBT"* dentro de `construirJornadas`, y eso **cruza una frontera de paquetes**:
+`Finding` es un tipo del dominio y vive en `EngineOutput.diagnosis`, mientras que
+`packages/temporal` es aritmética temporal y no conoce el dominio. La construcción de jornadas
+**calcula y expone la evidencia** —`sueñoMinutes`, `déficitSueñoMinutes`, `recorteVigilia`,
+`prohibeFocoNocturno`, `techoEnergía`— y **F2 emite el `Finding` verbatim desde ella**, sin
+recalcular nada. `engine-dev` mantuvo la frontera al implementar y tiene razón: el reparto es el
+correcto y este documento prometía lo contrario.
 
 La consecuencia práctica: **el motor no puede resolver un déficit de sueño quitando sueño.**
 Es la única restricción del sistema que nunca cede, ni siquiera ante un deadline duro. Si el
@@ -185,6 +273,12 @@ retículo de niveles:  SIN_FOCO < LOW < NEUTRAL < PEAK
                       orden de iteración. NO hay decrementos encadenados.
                       SIN_FOCO es CALCULADO y no se persiste: el enum `energy_tier` de la base
                       de datos tiene tres valores, no cuatro (02 §3).
+                      OJO (2026-07-30): hoy `Jornada.techoEnergía` está tipado `"NEUTRAL" | null`
+                      en packages/temporal, y es correcto — es el único valor que §3.1 produce y
+                      el paquete no debe inventarse un enum del dominio. Cuando el tier calculado
+                      de cuatro valores exista en `contracts`, AMPLIAR ese campo a ese tipo. Si
+                      la fase 3 decide que una jornada de sueño cero tiene techo LOW y nadie
+                      amplió el tipo, el compilador lo dirá; si nadie lo lee, no.
 
 función tierEn(t, franjas, compromisos, modificadores, jornada):
     nivel = franjaEn(t, franjas)?.tier ?? NEUTRAL      // sin franja declarada => NEUTRAL

@@ -126,10 +126,19 @@ La fase de mayor densidad de bugs potenciales por línea de código.
     instantes, sin horario de verano. `RRULE` y `CYCLE` son dos implementaciones de esta misma
     firma, así que los dos caminos de código que [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md)
     admitía como coste son ambos triviales de fixturar.
-  - **Etapa 2 — resolución a instantes**: `(fecha, start_local, zona efectiva, anchor,
-    overrides) => intervalo absoluto`. **El único sitio del paquete donde existe una zona
+  - **Etapa 2 — resolución a instantes**: `(fecha, start_local, zonaRegla, anchor,
+    overridesZona) => intervalo absoluto`. **El único sitio del paquete donde existe una zona
     horaria**, compartido por los dos generadores: la aritmética de cambio de horario se prueba
     una vez, no dos.
+
+    > **Corregida la firma el 2026-07-30.** Decía `(…, zona efectiva, anchor, overrides)`, que es
+    > redundante y además incorrecta: si la etapa 2 ya recibe la zona efectiva, los overrides
+    > sobran; y con `FIXED_ZONE` la zona efectiva **no debe consultarse en absoluto**. Lo correcto
+    > es recibir `zonaRegla` + `overridesZona` y **derivar dentro** la efectiva según el `anchor`,
+    > porque esa derivación es justamente lo único que distingue los tres valores: `FIXED_ZONE`
+    > ignora los overrides, `LOCAL_WHEREVER` los aplica, `SUSPEND_WHEN_AWAY` suprime la ocurrencia.
+    > Con la zona ya resuelta a la entrada, los tres serían indistinguibles. Verificado contra la
+    > implementación de `c718e06`.
 - Aplicación de excepciones ancladas por instante original, con **reporte de las que no casan
   con ninguna instancia** — nunca descarte silencioso (ADR-018 §7).
 - Resolución de zona horaria con `timezone_overrides` y `anchor` (los tres valores).
@@ -361,9 +370,16 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   > §3.3, §3.6 y §3.7.
 - **Property test 1 — las jornadas embaldosan la línea de tiempo:**
   `∀ i: jornada[i].wakeSig == jornada[i+1].wake` (instante exacto), y
-  `jornada.wake < jornada.sleep < jornada.wakeSig` estrictamente. Falla si hay un minuto que
-  pertenece a dos jornadas o a ninguna, y **falla también con una jornada degenerada**
+  `jornada.wake < jornada.sleep <= jornada.wakeSig`. Falla si hay un minuto que pertenece a dos
+  jornadas o a ninguna, y **falla también con una jornada degenerada**
   (`wake == sleep == wakeSig`).
+
+  > **`<=`, no `<`, corregido el 2026-07-30.** Escribí `sleep < wakeSig` estricto y **es falso**,
+  > con fixture delante: viajando al **este**, la hora local de acostarse puede caer después del
+  > despertar siguiente, y la igualdad es el caso real de la noche perdida (México → Madrid con
+  > sueño de 8 h da `sueño = 0` exacto). Lo que impide que `sleep` se pase de `wakeSig` es ahora un
+  > acotado explícito en la construcción, que existe porque sin él el intervalo `[wake, sleep)`
+  > **invade la jornada siguiente y la capacidad se cuenta dos veces**. Ver 03 §3.1.
 - **Property test 2 — la duración de la jornada es 1440 min menos el salto de offset:**
   para un horario local fijo, `∀ jornada: wakeSig − wake == 1440 − (offsetMin(wakeSig) −
   offsetMin(wake))`, sobre 365 días consecutivos en `America/Chicago`, `Europe/Madrid`,
@@ -371,7 +387,24 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   jornada siguiente se calcula sumando 1440 minutos en la línea de instantes en vez de un día de
   calendario.
 - Property test 3: `∀ jornada: vigilia >= 0 ∧ sueño >= 0`. Es el suelo, no el techo: lo
-  interesante son las dos de arriba.
+  interesante son las dos de arriba. Con el acotado de 03 §3.1 `sueño >= 0` es cierto **por
+  construcción**, así que este test vigila el acotado, no la aritmética.
+- **Viaje transmeridiano hacia el este, con valores exactos.** `America/Mexico_City` →
+  `Europe/Madrid` con override que empieza en `d+1`, `wake 07:00`, `sleep 23:00`: la jornada de `d`
+  mide 16 h, `sueño = 0` y `recorteVigilia = 0`. Con `Australia/Lord_Howe` (salto de 17 h) la
+  jornada mide 7 h, `sueño = 0` y **`recorteVigilia = 540 min`** — los 9 h de vigilia declarada
+  que no cupieron. En los dos casos **el embaldosado se mantiene** y **ningún minuto pertenece a
+  dos jornadas**: es el criterio que importa, porque el síntoma visible (sueño negativo) escondía
+  un solape de capacidad.
+- **`recorteVigilia == 0` en toda jornada que no cruza un salto de huso.** Si es distinto de cero
+  sin override de por medio, hay un bug en el acotado o en `zonaEfectivaEn`.
+- Hacia el **oeste** no hay recorte: la jornada se alarga, `sueño` crece y la vigilia no cambia.
+- **Una jornada de sueño cero dispara `prohibeFocoNocturno` y `techoEnergía`** igual que cualquier
+  otro déficit. **No** produce `INFEASIBLE`: el usuario cogió un vuelo, no hay nada imposible que
+  declarar.
+- **`zonaEfectivaEn(d, …)` se resuelve por el inicio del día civil `d` en la zona base**, y es
+  función pura de `d`. Test: la zona que resuelve `wakeSig` de la jornada `d` y la que resuelve
+  `wake` de la jornada `d+1` son **la misma llamada**, no dos que coinciden por cuidado.
 
   > **Sustituyen a un criterio tautológico, corregido el 2026-07-29** tras la auditoría de
   > `qa-engineer` ([`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md) §2,
