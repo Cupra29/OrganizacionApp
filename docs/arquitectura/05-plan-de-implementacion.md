@@ -437,9 +437,15 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
 - **`FRAGMENTATION_RISK` no sube por segmentar.** El mismo fixture, con y sin franja de pico
   declarada, da el **mismo** valor de fragmentación: la métrica cuenta huecos, no segmentos. Un día
   entero con tres niveles de energía no está fragmentado — nada lo interrumpe.
-- Un compromiso `HIGH` con arrastre de 90 min degrada **solo los primeros 90 minutos** del hueco
-  siguiente, no el hueco completo. Un hueco de cuatro horas que empieza un minuto antes de que
-  expire el arrastre conserva `PEAK` en 3 h 59 min. Sin arrastre declarado, no degrada nada.
+- Un compromiso `HIGH` con arrastre de 90 min deja en **`LOW`** —no en `NEUTRAL`— **solo los
+  primeros 90 minutos** del hueco siguiente, no el hueco completo. Un hueco de cuatro horas que
+  empieza un minuto antes de que expire el arrastre conserva `PEAK` en 3 h 59 min. Sin arrastre
+  declarado, no degrada nada.
+- **El arrastre no se compone:** dos compromisos `HIGH` con ventanas de arrastre **solapadas** dan
+  exactamente el mismo perfil que uno solo (`LOW`), y **tres también**. Nunca aparece `SIN_FOCO`
+  por acumulación de arrastres — ese nivel solo lo produce un `capacity_modifier` `NONE` declarado
+  por el usuario. Test adicional: **permutar el orden de los compromisos en la entrada no cambia
+  ni un segmento del perfil**, porque `tierEn` es un ínfimo de cotas independientes (03 §3.2).
 - Un `capacity_modifier` `NONE` de 30 min dentro de un hueco de cuatro horas descuenta **30
   minutos** de `assignableMinutes`, no cuatro horas, y **el tiempo sigue siendo colocable para
   bloques que no requieren foco** — no es indisponibilidad
@@ -487,6 +493,16 @@ La fase de mayor riesgo técnico.
 - **El número de plazas de colocación es el mismo que predice [ADR-015]** aunque los huecos tengan
   perfil segmentado: las restricciones duras nº 1 y nº 2 siguen midiendo el **hueco**, no el
   segmento. Si este criterio falla, el tope emergente se ha movido y ADR-015 necesita revisión.
+- **Los seis pesos `W_*` y la tabla `valor` de [03 §5.3](./03-motor-de-planificacion.md) llegan por
+  `EngineInput.params`.** Test: la función de puntuación **no contiene ningún número literal**. Es
+  el límite nº 5 de `CLAUDE.md` aplicado al sitio donde más se incumple hoy, y es deuda
+  **preexistente** anotada el 2026-07-29 — no la introduce la segmentación, pero la segmentación le
+  sube el apalancamiento: `valor` pasa de ordenar huecos entre sí a ser el peso de una media
+  ponderada que decide **dónde** dentro del hueco cae el bloque.
+- **Al calibrar esos pesos, un ADR nuevo que los fije con su análisis numérico**, al estilo de
+  ADR-015 y sin editarlo (no los menciona, así que no hay contradicción que reemplazar). Sin ese
+  ADR, los valores quedan como los eligió quien escribió la función y nadie sabrá por qué `PEAK`
+  vale 3 y no 5 — que es exactamente la situación que ADR-015 existió para evitar con la fricción.
 - La tasa de fallo del validador sobre los 1000 casos generados es **cero**.
 - El motor resuelve una ventana de 14 días con 6 objetivos y 40 compromisos en < 500 ms.
 

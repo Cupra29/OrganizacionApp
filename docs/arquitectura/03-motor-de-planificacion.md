@@ -179,7 +179,10 @@ persona puede trabajar de 21:45 a 23:15 sin levantarse aunque su pico empiece a 
 
 ```
 retículo de niveles:  SIN_FOCO < LOW < NEUTRAL < PEAK
-                      toda influencia es un MÍNIMO: ninguna sube el nivel, solo lo baja.
+                      TODA influencia es un MÍNIMO con un nivel fijo: ninguna sube el nivel, y
+                      ninguna depende de cuántas otras haya. Por tanto `tierEn` es el ínfimo de
+                      un conjunto de cotas independientes: idempotente, conmutativa y ajena al
+                      orden de iteración. NO hay decrementos encadenados.
                       SIN_FOCO es CALCULADO y no se persiste: el enum `energy_tier` de la base
                       de datos tiene tres valores, no cuatro (02 §3).
 
@@ -187,7 +190,7 @@ función tierEn(t, franjas, compromisos, modificadores, jornada):
     nivel = franjaEn(t, franjas)?.tier ?? NEUTRAL      // sin franja declarada => NEUTRAL
     para cada compromiso c con energyCost = HIGH:
         si c.fin <= t < c.fin + c.drainsAfterMinutes:  // SOLO dentro de la ventana de arrastre
-            nivel = degradar(nivel)                    // PEAK->NEUTRAL, NEUTRAL->LOW
+            nivel = min(nivel, LOW)                    // NO se compone: dos arrastres = uno
     si jornada.techoEnergía:  nivel = min(nivel, jornada.techoEnergía)   // deuda de sueño
     según modificadorEn(t, modificadores):
         NONE:     nivel = SIN_FOCO
@@ -253,6 +256,33 @@ que la calidad de la asignación es equivalente.
 > arrastre perdía cuatro horas de calidad por un minuto de solape. Ahora la condición es
 > `c.fin <= t < c.fin + c.drains`, evaluada por segmento. Es la misma regla, aplicada donde
 > corresponde.
+>
+> **El arrastre es `min(nivel, LOW)` y NO se compone** (segunda precisión del 2026-07-29). Antes
+> era `degradar(nivel)`, un decremento de un paso, y eso tenía tres problemas:
+>
+> 1. **Contradecía [02 §4](../02-modelo-de-datos.md)**, que es donde se definió la variante y que
+>    dice literalmente: *"un bloque `HIGH` con arrastre de 90 min degrada a **`LOW`** la energía de
+>    los 90 minutos siguientes"*. `degradar(PEAK)` da `NEUTRAL`, no `LOW`. Los dos documentos solo
+>    coincidían cuando la base ya era `NEUTRAL`.
+> 2. **No cumplía su propósito declarado.** [00](../00-vision-y-alcance.md) y 02 justifican el
+>    arrastre con *"el motor no colocará trabajo profundo justo después"*. Con la tabla de
+>    puntuación de §5.3, el foco profundo vale `NEUTRAL = +1`: positivo, así que el motor **sí** lo
+>    colocaría, solo con menos ganas. `LOW = −2` es lo que lo repele activamente. El decremento
+>    fallaba precisamente en el caso que más importa: el profesor cuyo pico viene justo después de
+>    su clase.
+> 3. **No era idempotente**, así que el resultado dependía de **cuántas** ventanas de arrastre
+>    solapaban y no de cuál: dos clases seguidas daban `LOW`, tres daban `SIN_FOCO`. Y `SIN_FOCO`
+>    habría sido indistinguible de un `capacity_modifier` `NONE` declarado por el usuario, que
+>    semánticamente es otra cosa (ADR-011 §2), **y además habría descontado esos minutos de
+>    `brutoAsignable`**: un efecto de capacidad producido por acumulación accidental. Con `min(·,
+>    LOW)` el suelo del arrastre es `LOW` por construcción y esa colisión es imposible; no hace
+>    falta ningún tope.
+>
+> Que dos clases seguidas "agoten más que una" es cierto como intuición, pero el sistema **no
+> tiene con qué medir ese más**: `drains_after_minutes` expresa *cuánto dura* el arrastre, no su
+> profundidad. Modelar la intensidad acumulada exigiría un campo que hoy no existe y que nadie ha
+> pedido. Si algún día hace falta, será una decisión con su ADR y no un efecto lateral del orden en
+> que se recorre un array.
 
 ### 3.3 Capacidad asignable
 
@@ -495,6 +525,24 @@ valor:  FOCUS profundo    -> PEAK=3, NEUTRAL=1, LOW=-2
         bienestar         -> según preferred_tier
 ```
 
+> **Estos números son `params`, no literales, y la fase 4 no puede tratarlos de otro modo.** Los
+> seis pesos `W_*` y la tabla `valor` son **parámetros de calibración** y caen de lleno en el
+> límite nº 5 de `CLAUDE.md` ("ninguna constante mágica en el motor; todo número calibrable va en
+> `EngineInput.params`"). Hoy están escritos aquí como ilustración y **no aparecen en
+> [ADR-015](./adr/ADR-015-parametros-de-calibracion.md) ni en ningún `params` declarado**: es deuda
+> preexistente, anotada el 2026-07-29 al revisar la segmentación.
+>
+> **Por qué ahora importa más que antes.** Con un `tier` por hueco, `valor` se consultaba una vez
+> por bloque y solo ordenaba huecos entre sí. Con el perfil segmentado es el **peso de una media
+> ponderada por minutos**, así que las magnitudes relativas deciden **dónde exactamente** desliza el
+> bloque dentro del hueco. Que `PEAK` valga 3 y `NEUTRAL` 1 —y no 5 y 1— cambia cuánto pico está
+> dispuesto a sacrificar un bloque para evitar dejar un residuo inútil. El apalancamiento de estos
+> números subió; su condición de literales no.
+>
+> **Recomendación para la fase 4:** al calibrarlos, un **ADR nuevo** que los fije con su análisis
+> numérico, al estilo de ADR-015 y **sin editarlo** — ADR-015 no los menciona, así que no hay
+> contradicción que reemplazar, es una decisión sobre parámetros que él no cubrió.
+
 **La media ponderada es lo que alinea el bloque con el pico sin trocear nada.** Un bloque de foco
 de 90 min en una tarde libre con pico de 22:00 a 01:00 puntúa más alto cuanto más pico cubre, así
 que el maximizador lo desliza hasta encajarlo dentro del pico por sí solo. Y si el pico solo mide
@@ -502,10 +550,11 @@ que el maximizador lo desliza hasta encajarlo dentro del pico por sí solo. Y si
 El comportamiento que el cronotipo promete **emerge de la puntuación**, no de una regla nueva.
 
 > **Pendiente para la fase 4, anotado para que sea una elección y no un descubrimiento:** con el
-> arrastre ya degradando exactamente su ventana en el perfil de energía (§3.2), el término
-> `W_ARRASTRE` queda **parcialmente redundante** — penaliza dos veces lo mismo. Puede que siga
-> teniendo sentido para castigar la *proximidad* a un compromiso pesado más allá de la ventana
-> declarada, que es un efecto distinto. Se decide con el código delante y midiendo, no ahora.
+> arrastre fijando `LOW` exactamente en su ventana (§3.2), el término `W_ARRASTRE` queda **muy
+> probablemente redundante**: `valor(FOCUS profundo, LOW) = −2` ya repele el foco de esa ventana con
+> fuerza, así que el término penalizaría dos veces lo mismo. Puede que siga valiendo para castigar
+> la *proximidad* a un compromiso pesado **más allá** de la ventana declarada, que es un efecto
+> distinto y que hoy nada modela. Se decide con el código delante y midiendo, no ahora.
 
 El valor **negativo** de colocar trabajo administrativo en la franja pico es deliberado: no
 basta con preferir el pico para el trabajo profundo, hay que **penalizar activamente** que lo
