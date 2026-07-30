@@ -111,6 +111,16 @@ Se descarta por sobreingeniería: tres generadores cubren todos los casos del br
 - Consultar "¿qué compromisos tengo el martes?" exige expandir, no basta un `SELECT`.
 
 **Lo que queda condicionado**
+- **Nota fechada (2026-07-29): el caso desalineado está confirmado.** Q13 se resolvió a favor de
+  un turno rotativo **desfasado de la semana civil**. Hasta ese día, el descarte de "solo RRULE"
+  se apoyaba en el 2-2-3 de 14 días como único ejemplo desalineado, y nadie había confirmado que
+  existiera de verdad: la justificación de `CYCLE` era correcta pero hipotética. Ahora es
+  empírica. **No cambia ninguna decisión de este ADR** —de ahí que sea una nota y no un ADR de
+  reemplazo—, pero sí cambia dos cosas fuera: la fixture representativa y el patrón de la demo de
+  la fase 3, corregidos en [05](../05-plan-de-implementacion.md). **Cuidado con el ejemplo de
+  `CYCLE` de más arriba**: un 4×3 son 4 + 3 = 7 días, así que está *alineado* con la semana civil
+  y produce semanas idénticas. Sirve de ilustración de la estructura, no de demostración de que
+  el modelo no es una semana plantilla. La longitud del ciclo real no está fijada.
 - El motor recibe compromisos **ya materializados** ([ADR-013]). Toda la complejidad del turno
   rotativo vive en la expansión y no contamina las reglas de planificación: ese confinamiento
   es el objetivo de diseño.

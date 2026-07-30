@@ -255,8 +255,10 @@ imposibles de editar en una interfaz. El generador `CYCLE` lo dice directamente:
 >
 > **Ojo con este ejemplo como fixture de prueba:** un 4×3 es un ciclo de **7 días**, así que está
 > alineado con la semana civil y produce semanas idénticas. No sirve para demostrar que el modelo
-> no es una semana plantilla; para eso hace falta un ciclo no múltiplo de 7. Ver el criterio
-> corregido de la fase 1 en [05](./05-plan-de-implementacion.md) y **Q13**.
+> no es una semana plantilla; para eso hace falta un ciclo no múltiplo de 7. **Q13, resuelta el
+> 2026-07-29, confirmó que el turno real está desalineado de la semana civil**, así que la fixture
+> representativa es una de ciclo no múltiplo de 7 y esta queda como el caso que nombra el brief.
+> Ver el criterio corregido de la fase 1 en [05](./05-plan-de-implementacion.md).
 
 `effective_from` y `effective_until` son columnas `date` sin zona, y [ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md)
 prohíbe una fecha civil sin zona: **se interpretan en `recurrence_rules.timezone`**, que está en
