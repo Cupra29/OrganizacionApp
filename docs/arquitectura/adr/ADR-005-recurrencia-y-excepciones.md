@@ -111,16 +111,38 @@ Se descarta por sobreingeniería: tres generadores cubren todos los casos del br
 - Consultar "¿qué compromisos tengo el martes?" exige expandir, no basta un `SELECT`.
 
 **Lo que queda condicionado**
-- **Nota fechada (2026-07-29): el caso desalineado está confirmado.** Q13 se resolvió a favor de
-  un turno rotativo **desfasado de la semana civil**. Hasta ese día, el descarte de "solo RRULE"
-  se apoyaba en el 2-2-3 de 14 días como único ejemplo desalineado, y nadie había confirmado que
-  existiera de verdad: la justificación de `CYCLE` era correcta pero hipotética. Ahora es
-  empírica. **No cambia ninguna decisión de este ADR** —de ahí que sea una nota y no un ADR de
-  reemplazo—, pero sí cambia dos cosas fuera: la fixture representativa y el patrón de la demo de
-  la fase 3, corregidos en [05](../05-plan-de-implementacion.md). **Cuidado con el ejemplo de
-  `CYCLE` de más arriba**: un 4×3 son 4 + 3 = 7 días, así que está *alineado* con la semana civil
-  y produce semanas idénticas. Sirve de ilustración de la estructura, no de demostración de que
-  el modelo no es una semana plantilla. La longitud del ciclo real no está fijada.
+- **Nota fechada (2026-07-30, corrige y sustituye a la del 2026-07-29): el turno real es 2-2-3
+  de 14 días, y NO está desfasado de la semana civil.**
+
+  > **Qué decía la nota anterior y por qué era falsa.** Decía que Q13 había confirmado un turno
+  > *"desfasado de la semana civil"* y que con ello la justificación de `CYCLE` pasaba "de
+  > hipotética a empírica". El dato exacto llegó el 2026-07-30 y **desmiente la primera mitad**: el
+  > turno es un **2-2-3 con ciclo de 14 días**, y 14 es múltiplo de 7, así que está **enganchado**
+  > a la semana civil con **periodo 2**, no desfasado. Anclado en lunes: semanas impares
+  > `{L,M,V,S,D}`, semanas pares `{X,J}`. Dos patrones que alternan, no una deriva. Se reescribe la
+  > nota en vez de apilar otra encima porque dejar una afirmación falsa en pie y contradecirla más
+  > abajo obliga a cada lector a averiguar cuál gana.
+
+  **La conclusión se sostiene, pero por la cláusula correcta de este ADR.** El descarte de "solo
+  RRULE" **no** se apoya en la expresividad: el 2-2-3 **sí** es expresable como dos `RRULE` con
+  `INTERVAL=2` ancladas en semanas distintas (`BYDAY=MO,TU,FR,SA,SU` y `BYDAY=WE,TH`). Se apoya en
+  la **ergonomía**, que es lo que dice el texto de arriba: *"varias reglas coordinadas con offsets
+  calculados, que la interfaz tendría que generar y el usuario no podría entender ni editar"*, y
+  **"un turno 2-2-3 con ciclo de 14 días es directamente hostil"**. Ese caso, nombrado aquí por su
+  nombre desde el 2026-07-24, **es exactamente el turno real del usuario**. La justificación se
+  confirma empíricamente; lo que estaba mal era la cláusula que citó la nota de ayer.
+
+  **Dos imprecisiones de este ADR que el dato deja a la vista**, ninguna con efecto sobre la
+  decisión:
+  - El contexto describe el 4×3 como *"con ciclo desfasado de la semana civil"*. **No lo está**:
+    4 + 3 = 7. Un 4×3 produce semanas civiles idénticas con cualquier ancla.
+  - El ejemplo de `cycle_pattern` de más arriba (`cycleLengthDays: 7`) ilustra la **estructura**
+    del generador; no demuestra que el modelo no sea una semana plantilla, porque su periodo es 1.
+
+  **El número que importa, y que ninguno de los tres casos hacía evidente:** el periodo en semanas
+  de un ciclo de `L` días es `L / mcd(L, 7)`. De ahí, `L=7 → 1`, `L=14 → 2`, `L=8 → 8`, `L=28 → 4`.
+  Lo que refuta la semana plantilla ([ADR-003](./ADR-003-modelo-temporal-y-zonas-horarias.md) regla
+  3) es **periodo ≥ 2**, no la deriva. El 2-2-3 del usuario, con periodo 2, ya la refuta.
 - El motor recibe compromisos **ya materializados** ([ADR-013]). Toda la complejidad del turno
   rotativo vive en la expansión y no contamina las reglas de planificación: ese confinamiento
   es el objetivo de diseño.

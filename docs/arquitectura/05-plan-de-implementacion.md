@@ -226,16 +226,31 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
 > **con un motor que no implemente `disambiguation` en absoluto**. Sí es la zona correcta para
 > aislar la aritmética de medianoche del DST, que son dos bugs distintos.
 
-- **Fixture representativa (Q13):** un turno rotativo de **ciclo desalineado de la semana civil**
-  anclado el 2026-08-03 expande 8 semanas civiles **distintas entre sí**, y la **semana 9 vuelve a
-  ser igual que la 1**. Se usa un ciclo de **8 días** (4 de trabajo / 4 de descanso) porque es el
-  que hace la aserción más fuerte: el patrón avanza un día de la semana por ciclo, así que el
-  periodo es exactamente 8 semanas y salen las ocho distintas **más** un falsificador. **Los 8
-  días son una elección de prueba, no un dato del usuario**: Q13 confirmó que el turno real está
-  desalineado y **no** su longitud exacta.
-- Un turno rotativo **4×3** (ciclo de 7 días, alineado) anclado el 2026-08-03 expande
-  correctamente 8 semanas. Se conserva porque es el caso que nombra el brief, pero **no demuestra
-  nada sobre la semana plantilla**: sus ocho semanas son idénticas por construcción.
+> **Tres fixtures de `CYCLE`, una por régimen.** El periodo en semanas de un ciclo de `L` días es
+> `L / mcd(L, 7)`, y ese número —no "alineado o no"— es lo que decide qué prueba cada una. Lo que
+> refuta la semana plantilla ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3)
+> es **periodo ≥ 2**. Las tres se anclan el 2026-08-03, que es lunes.
+>
+> | Fixture | `L` | Periodo | Qué prueba |
+> |---|---|---|---|
+> | 4×3 | 7 | **1** | El caso que nombra el brief. **No** refuta la semana plantilla |
+> | **2-2-3** | **14** | **2** | **El turno real del usuario** (Q13). Alternancia A/B |
+> | 4 on / 4 off | 8 | **8** | Deriva máxima. Carga la aserción fuerte |
+
+- **El turno real (Q13): 2-2-3 con ciclo de 14 días.** Anclado el 2026-08-03 produce exactamente
+  dos patrones civiles que alternan — semanas impares `{L,M,V,S,D}`, semanas pares `{X,J}` — y la
+  semana 3 es idéntica a la 1. **La trampa que este caso caza y ningún otro:** 14 es múltiplo de 7,
+  así que una implementación que redujera el ciclo módulo 7 lo colapsaría a un patrón semanal único
+  y daría un resultado **equivocado pero plausible**. Con `L=8` el mismo bug es obvio; con `L=14`
+  no.
+- **Aserción fuerte, con ciclo de 8 días** (4 de trabajo / 4 de descanso): 8 semanas civiles
+  **distintas entre sí** y la **semana 9 igual que la 1**. Es el ciclo con el que la aserción es
+  máxima —el patrón avanza un día de la semana por ciclo, así que el periodo es exactamente 8—.
+  **Los 8 días son una elección de prueba, no el turno de nadie**, y por eso este criterio no se
+  tocó cuando llegó el dato real.
+- Un turno rotativo **4×3** (ciclo de 7 días) anclado el 2026-08-03 expande correctamente 8
+  semanas. Se conserva porque es el caso que nombra el brief, pero **no demuestra nada sobre la
+  semana plantilla**: su periodo es 1 y sus ocho semanas son idénticas por construcción.
 
   > **Corregido el 2026-07-29** al contrastar los candidatos de expansión contra este criterio
   > ([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md)). El criterio pedía semanas
@@ -244,12 +259,20 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   > fixture de ADR-005 y [02 §4.1](./02-modelo-de-datos.md) usa `cycleLengthDays: 7` y por tanto
   > nunca habría podido pasar. Lo que el criterio quería probar —que el modelo **no** es una
   > semana plantilla ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3)—
-  > necesita un ciclo no múltiplo de 7. Con 8 días, el patrón avanza un día de la semana por
-  > ciclo y el periodo es exactamente 8 semanas: se obtienen las ocho distintas **y** un
-  > falsificador (la 9ª repite la 1ª) que un expansor que devuelva ruido no puede satisfacer.
-  > Se conservan las dos fixtures, y **Q13 (resuelta el 2026-07-29) decidió cuál manda**: el turno
-  > real está desalineado, así que la desalineada es la representativa y la de 7 días queda como el
-  > caso del brief. Ambas empiezan en 2026-08-03, que es lunes.
+  > necesita **periodo ≥ 2**. Con 8 días, el patrón avanza un día de la semana por ciclo y el
+  > periodo es exactamente 8 semanas: se obtienen las ocho distintas **y** un falsificador (la 9ª
+  > repite la 1ª) que un expansor que devuelva ruido no puede satisfacer.
+  >
+  > *(Aquella nota decía "necesita un ciclo no múltiplo de 7". También era inexacto, aunque nadie
+  > lo notó entonces: un ciclo de 14 días es múltiplo de 7 y tiene periodo 2, así que sirve. La
+  > condición es sobre el periodo, no sobre la divisibilidad.)*
+  > **Segunda corrección, 2026-07-30.** El 29 se anotó aquí que Q13 había confirmado un turno
+  > "desalineado" y que por eso la fixture de 8 días pasaba a ser la representativa. **El dato
+  > exacto llegó después y lo desmintió**: el turno real es un **2-2-3 de 14 días**, que está
+  > enganchado a la semana civil con periodo 2, no desfasado. La fixture de 8 días **se queda
+  > igual** —cargaba la aserción fuerte y estaba escrita como elección de prueba, no como dato del
+  > usuario— y entra el 2-2-3 como tercer caso. Lo que sí cambia es el patrón de la demo de la
+  > fase 3. Detalle del error de encuadre en **Q13**.
 - Una jornada que cruza un cambio de horario mide 23 h o 25 h reales, no 24. **Con
   `America/Chicago`**: la jornada del 2026-03-07 (wake 07:00, sleep 23:00) mide **1380 min** y la
   del 2026-10-31 mide **1500 min**, comparadas contra instantes UTC exactos.
@@ -411,20 +434,26 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   depurar el motor sin interfaz.
 
 **Criterio de aceptación**
-- **Ya hay valor demostrable sin plan.** Con un fixture de enfermera con **turno rotativo
-  desalineado de la semana civil**, el diagnóstico dice cuántas horas asignables tiene realmente
-  **cada semana** —que no son las mismas dos semanas seguidas— y qué porcentaje de su franja pico
-  está ocupada. Se puede enseñar a un usuario y que le resulte útil.
+- **Ya hay valor demostrable sin plan.** Con el fixture de enfermera con **turno 2-2-3 de ciclo de
+  14 días** —el turno real de Q13—, el diagnóstico dice cuántas horas asignables tiene realmente
+  **cada semana** —que no son las mismas dos semanas seguidas: la semana `{L,M,V,S,D}` y la
+  `{X,J}` dan cifras distintas— y qué porcentaje de su franja pico está ocupada. Se puede enseñar a
+  un usuario y que le resulte útil.
 
-  > **Corregido el 2026-07-29 (Q13).** Este criterio decía "turnos 4×3", que es un ciclo de 7 días
-  > y por tanto **alineado** con la semana civil: la demo habría enseñado ocho semanas idénticas.
-  > Siendo la primera cosa que el proyecto muestra, habría presentado como logro justo lo que un
-  > calendario semanal ordinario también sabe hacer, y habría ocultado la propiedad que sostiene
-  > todo el diseño temporal —que la unidad es la jornada y no existe semana plantilla
-  > ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3)—. Q13 confirmó que el
-  > turno real está desalineado, así que la demo usa la fixture representativa de la fase 1. **La
-  > longitud del ciclo sigue sin fijarse**; si esta demo tiene que retratar un turno concreto y no
-  > solo demostrar la propiedad, ese dato falta.
+  > **Corregido dos veces, y la segunda por el dato real.** El 2026-07-29 este criterio decía
+  > "turnos 4×3": ciclo de 7 días, **periodo 1**, ocho semanas idénticas. Siendo la primera cosa
+  > que el proyecto enseña, habría presentado como logro justo lo que un calendario semanal
+  > ordinario también sabe hacer. Se cambió entonces a "ciclo desalineado" por una lectura de Q13
+  > que resultó equivocada; el **2026-07-30** llegó el dato exacto y la demo pasa al **2-2-3 de 14
+  > días**, que es **periodo 2**.
+  >
+  > **Por qué el turno real y no el de 8 días, que impresiona más.** Esta demo existe para enseñar
+  > el **diagnóstico** —horas asignables y ocupación del pico—, no para probar el modelo temporal;
+  > eso lo prueban los criterios de la fase 1. Y para convencer a una persona, su propio turno vale
+  > más que uno sintético. Periodo 2 basta para lo único que la demo necesita afirmar: **que no hay
+  > una semana tipo**, que es la propiedad que sostiene todo el diseño
+  > ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3). Lo que ya **no** puede
+  > decir esta demo es "ocho semanas distintas".
 - El fixture 09 (madrugador) produce la misma estructura de capacidad que el 08 (nocturno)
   con las franjas espejadas. **Test antisesgo**: si difieren, hay un `if` que favorece a un
   cronotipo.
