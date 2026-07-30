@@ -9,11 +9,20 @@
 // escape según qué día se ejecute la suite. La rejilla se elige para cubrir el borde donde
 // vivía el bug real —el cambio de zona a mitad de ventana— y las cuatro formas de transición
 // horaria de `07 §4.E`, incluida la de 30 minutos.
+//
+// **Y una cuarta propiedad que `05` no enuncia, porque el embaldosado no la implica**: que
+// `[wake, sleep)` de una jornada no invada la siguiente. El embaldosado va de despertar a
+// despertar y no dice nada de dónde cae `sleep` — el doble conteo de capacidad vivía justo ahí.
 
 import { describe, expect, it } from "vitest";
 import { D, elemento, I, offsetMinutosEn, T, ZONA } from "./fixtures.ts";
-import { construirJornadas, type Jornada } from "./jornadas.ts";
-import type { Temporal } from "./temporal.ts";
+import {
+  construirJornadas,
+  type Jornada,
+  type JornadaDegenerada,
+  type PerfilTemporal,
+} from "./jornadas.ts";
+import { Temporal } from "./temporal.ts";
 import { instanteDe, type OverrideZona, zonaEfectivaEn } from "./zona.ts";
 
 const ZONAS = [
@@ -58,6 +67,10 @@ const DIAS_POR_VENTANA = 5;
  * Configuraciones de `timezone_overrides`: ninguna, una que EMPIEZA a mitad de ventana y una
  * que TERMINA a mitad de ventana, contra cada zona de destino. Es el borde exacto donde el bug
  * de `zonaSig` rompía el embaldosado, y por eso está en la rejilla y no en un caso suelto.
+ *
+ * El salto máximo del conjunto es México (−6) → Lord Howe (+11), 17 h: menos de 24, así que la
+ * rejilla nunca produce una `JornadaDegenerada`. Que no la produzca es una **aserción**, no un
+ * supuesto — ver la primera propiedad.
  */
 function configuracionesDeViaje(ancla: string, zonaBase: string): readonly OverrideZona[][] {
   const corte = I(`${D(ancla).add({ days: 2 }).toString()}T00:00:00Z`);
@@ -79,7 +92,15 @@ interface Caso {
   readonly ancla: string;
   readonly overridesZona: readonly OverrideZona[];
   readonly jornadas: readonly Jornada[];
+  readonly degeneradas: readonly JornadaDegenerada[];
 }
+
+const perfilDe = (zona: string, wake: string, sleep: string): PerfilTemporal => ({
+  baseTimezone: zona,
+  defaultWakeLocal: T(wake),
+  defaultSleepLocal: T(sleep),
+  sleepNeedMinutes: 480,
+});
 
 function generarCasos(): readonly Caso[] {
   const casos: Caso[] = [];
@@ -87,27 +108,13 @@ function generarCasos(): readonly Caso[] {
     for (const { wake, sleep } of HORARIOS) {
       for (const ancla of ANCLAS) {
         for (const overridesZona of configuracionesDeViaje(ancla, zonaBase)) {
-          casos.push({
-            zonaBase,
-            wake,
-            sleep,
-            ancla,
+          const salida = construirJornadas({
+            ventana: { desde: D(ancla), hasta: D(ancla).add({ days: DIAS_POR_VENTANA }) },
+            perfil: perfilDe(zonaBase, wake, sleep),
+            excepcionesDia: [],
             overridesZona,
-            jornadas: construirJornadas({
-              ventana: {
-                desde: D(ancla),
-                hasta: D(ancla).add({ days: DIAS_POR_VENTANA }),
-              },
-              perfil: {
-                baseTimezone: zonaBase,
-                defaultWakeLocal: T(wake),
-                defaultSleepLocal: T(sleep),
-                sleepNeedMinutes: 480,
-              },
-              excepcionesDia: [],
-              overridesZona,
-            }),
           });
+          casos.push({ zonaBase, wake, sleep, ancla, overridesZona, ...salida });
         }
       }
     }
@@ -121,13 +128,23 @@ const rotulo = (c: Caso, j: Jornada) =>
   `${c.zonaBase} ${c.wake}-${c.sleep} ${j.fecha.toString()} ` +
   `overrides=${c.overridesZona.map((o) => o.timezone).join(",") || "ninguno"}`;
 
+/** `true` si la jornada de `j.fecha` cruza un cambio de huso hacia el día siguiente. */
+function cruzaFronteraDeHuso(c: Caso, j: Jornada): boolean {
+  const zona = zonaEfectivaEn(j.fecha, c.overridesZona, c.zonaBase);
+  const zonaSig = zonaEfectivaEn(j.fecha.add({ days: 1 }), c.overridesZona, c.zonaBase);
+  return zona !== zonaSig;
+}
+
 describe("Propiedad 1 — las jornadas embaldosan la línea de tiempo", () => {
-  it("genera casos suficientes, y con cambio de zona a mitad de ventana", () => {
+  it("genera casos suficientes, con cambio de zona a mitad de ventana y sin degeneradas", () => {
     // Sin esto la propiedad podría pasar sobre cero casos. Es el mismo argumento que
     // `depcruise:cobertura`: un análisis que no mira nada sale en verde.
     expect(CASOS.length).toBeGreaterThan(1000);
-    expect(CASOS.every((c) => c.jornadas.length === DIAS_POR_VENTANA)).toBe(true);
     expect(CASOS.some((c) => c.overridesZona.length > 0)).toBe(true);
+    // El salto máximo de la rejilla es de 17 h: ninguna ventana pierde una jornada, así que
+    // comparar `jornadas[i]` con `jornadas[i+1]` es comparar días consecutivos de verdad.
+    expect(CASOS.every((c) => c.jornadas.length === DIAS_POR_VENTANA)).toBe(true);
+    expect(CASOS.every((c) => c.degeneradas.length === 0)).toBe(true);
   });
 
   it("`jornada[i].wakeSig == jornada[i+1].wake`, instante exacto, en TODOS los casos", () => {
@@ -147,37 +164,21 @@ describe("Propiedad 1 — las jornadas embaldosan la línea de tiempo", () => {
     }
   });
 
-  it("`wake < sleep`, estrictamente, en TODOS los casos", () => {
+  it("`wake < sleep <= wakeSig` en TODOS los casos, sin excepción ni condición", () => {
+    // El `<=` no es una tolerancia: la igualdad es el caso REAL de la noche perdida al volar al
+    // este, y con el acotado de `sleep` se cumple por construcción. Antes del acotado esta
+    // propiedad era falsa —`sleep` se pasaba de `wakeSig`— y ahí vivía el doble conteo.
+    let enElLimite = 0;
     for (const c of CASOS) {
       for (const j of c.jornadas) {
         expect(j.wake.epochNanoseconds < j.sleep.epochNanoseconds, rotulo(c, j)).toBe(true);
+        expect(j.sleep.epochNanoseconds <= j.wakeSig.epochNanoseconds, rotulo(c, j)).toBe(true);
+        if (j.sleep.equals(j.wakeSig)) enElLimite += 1;
       }
     }
-  });
-
-  it("`sleep < wakeSig`, estrictamente, salvo cruzando una frontera de zona", () => {
-    // La condición no es un parche para hacer pasar el test: es un HALLAZGO. Con un viaje
-    // hacia el este que empieza en `d+1`, la jornada de `d` pierde tantas horas de sueño como
-    // salte el offset, y con un salto >= la ventana de sueño el `wakeSig` cae ANTES que el
-    // `sleep`. México → Madrid de un día para otro son 8 h de salto y 8 h de sueño: el sueño
-    // sale exactamente 0. Ver el caso explícito de más abajo. La mitad estricta de esta
-    // propiedad, tal como está escrita en `05`, es FALSA en ese escenario, y no por un bug.
-    let comprobadas = 0;
-    let excluidas = 0;
-    for (const c of CASOS) {
-      for (const j of c.jornadas) {
-        const zona = zonaEfectivaEn(j.fecha, c.overridesZona, c.zonaBase);
-        const zonaSig = zonaEfectivaEn(j.fecha.add({ days: 1 }), c.overridesZona, c.zonaBase);
-        if (zona !== zonaSig) {
-          excluidas += 1;
-          continue;
-        }
-        comprobadas += 1;
-        expect(j.sleep.epochNanoseconds < j.wakeSig.epochNanoseconds, rotulo(c, j)).toBe(true);
-      }
-    }
-    expect(comprobadas).toBeGreaterThan(1000);
-    expect(excluidas).toBeGreaterThan(0);
+    // Si nunca se alcanzara la igualdad, el `<=` sería un `<` disfrazado y la rejilla no
+    // estaría ejercitando el caso por el que se relajó.
+    expect(enElLimite).toBeGreaterThan(0);
   });
 
   it("ninguna jornada es degenerada: `wake == sleep == wakeSig` no aparece nunca", () => {
@@ -189,11 +190,69 @@ describe("Propiedad 1 — las jornadas embaldosan la línea de tiempo", () => {
   });
 });
 
+describe("El acotado impide el doble conteo — la propiedad que el embaldosado NO implica", () => {
+  it("`[wake, sleep)` de una jornada nunca invade la siguiente, en TODOS los casos", () => {
+    // 03 §3.2 saca los huecos de `restar(intervalo(wake, sleep), unir(ocupado))`. Si ese
+    // intervalo se sale de la jornada, dos jornadas reclaman los mismos minutos y
+    // `brutoAsignable` los suma dos veces. Semiabierto: no solapan si y solo si la primera
+    // termina en o antes del inicio de la segunda — la misma semántica que la constraint de
+    // exclusión de 02 §6.2.
+    for (const c of CASOS) {
+      for (let i = 0; i + 1 < c.jornadas.length; i += 1) {
+        const actual = elemento(c.jornadas, i);
+        const siguiente = elemento(c.jornadas, i + 1);
+        expect(
+          Temporal.Instant.compare(actual.sleep, siguiente.wake) <= 0,
+          `[wake, sleep) invade la jornada siguiente en ${rotulo(c, actual)}: ` +
+            `sleep=${actual.sleep.toString()} wake[i+1]=${siguiente.wake.toString()}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("`recorteVigiliaMinutes == 0` en toda jornada que NO cruza un salto de huso", () => {
+    // El control negativo masivo: la inmensa mayoría de la rejilla. Si el acotado recortara
+    // algo en una jornada normal, se estaría comiendo vigilia real y esto lo dice.
+    let sinFrontera = 0;
+    let conRecorte = 0;
+    for (const c of CASOS) {
+      for (const j of c.jornadas) {
+        if (cruzaFronteraDeHuso(c, j)) {
+          if (j.recorteVigiliaMinutes > 0) conRecorte += 1;
+          continue;
+        }
+        sinFrontera += 1;
+        expect(j.recorteVigiliaMinutes, rotulo(c, j)).toBe(0);
+      }
+    }
+    expect(sinFrontera).toBeGreaterThan(1000);
+    // Y al menos una jornada de la rejilla sí recorta: si no, el campo nunca se ejercitaría.
+    expect(conRecorte).toBeGreaterThan(0);
+  });
+
+  it("cuando hay recorte, `sleep` cae exactamente en `wakeSig` y el sueño es cero", () => {
+    let vistas = 0;
+    for (const c of CASOS) {
+      for (const j of c.jornadas) {
+        if (j.recorteVigiliaMinutes === 0) continue;
+        vistas += 1;
+        expect(j.sleep.equals(j.wakeSig), rotulo(c, j)).toBe(true);
+        expect(j.sueñoMinutes, rotulo(c, j)).toBe(0);
+        // Sueño cero es el caso extremo de `SLEEP_DEBT`, y no necesita maquinaria nueva.
+        expect(j.déficitSueñoMinutes, rotulo(c, j)).toBe(480);
+        expect(j.techoEnergía, rotulo(c, j)).toBe("NEUTRAL");
+      }
+    }
+    expect(vistas).toBeGreaterThan(0);
+  });
+});
+
 describe("Propiedad 1 — control negativo: el bug de `zonaSig`, escrito y comparado", () => {
   // La copia con el bug que 03 §3.1 tuvo hasta el 2026-07-29: `wakeSig` calculado con la zona
   // del día `d` en vez de la del día `d+1`. Existe para demostrar que la propiedad del
   // embaldosado NO es decorativa — que caza exactamente el defecto por el que se escribió.
   // Es el mismo papel que `guardrail:cobertura` cumple para el plugin de reloj.
+  //
   // La mutación es EXACTAMENTE un argumento: `zona` donde va `zonaSig`. Nada más cambia.
   function wakeSigConElBug(
     fecha: Temporal.PlainDate,
@@ -211,63 +270,26 @@ describe("Propiedad 1 — control negativo: el bug de `zonaSig`, escrito y compa
       timezone: ZONA.DST_UE,
     },
   ];
-  const jornadas = construirJornadas({
+  const { jornadas } = construirJornadas({
     ventana: { desde: D("2026-08-03"), hasta: D("2026-08-05") },
-    perfil: {
-      baseTimezone: ZONA.MEDIANOCHE_SIN_DST,
-      defaultWakeLocal: T("07:00"),
-      defaultSleepLocal: T("23:00"),
-      sleepNeedMinutes: 480,
-    },
+    perfil: perfilDe(ZONA.MEDIANOCHE_SIN_DST, "07:00", "23:00"),
     excepcionesDia: [],
     overridesZona: viaje,
   });
 
   it("con la zona correcta (`d+1`) las dos jornadas encajan", () => {
-    expect(jornadas[0]?.wakeSig.toString()).toBe(jornadas[1]?.wake.toString());
-    expect(jornadas[0]?.wakeSig.toString()).toBe(I("2026-08-04T05:00:00Z").toString());
+    expect(elemento(jornadas, 0).wakeSig.toString()).toBe(elemento(jornadas, 1).wake.toString());
+    expect(elemento(jornadas, 0).wakeSig.toString()).toBe(I("2026-08-04T05:00:00Z").toString());
   });
 
   it("con la zona del día `d` dejan de encajar, y el desfase es la diferencia de offsets", () => {
     const conBug = wakeSigConElBug(D("2026-08-03"), ZONA.MEDIANOCHE_SIN_DST, viaje, "07:00");
-    expect(conBug.toString()).not.toBe(jornadas[1]?.wake.toString());
+    expect(conBug.toString()).not.toBe(elemento(jornadas, 1).wake.toString());
     // 07:00 en México (UTC−6) contra 07:00 en Madrid (UTC+2): 8 h de hueco en la línea de
     // tiempo, ocho horas que no pertenecerían a ninguna jornada y que nada señalaría.
     expect(conBug.toString()).toBe(I("2026-08-04T13:00:00Z").toString());
     const desfaseMinutos = elemento(jornadas, 1).wake.until(conBug).total({ unit: "minute" });
     expect(desfaseMinutos).toBe(480);
-  });
-});
-
-describe("El residuo de `03 §3.1`: un viaje hacia el este se come la noche", () => {
-  it("México → Madrid de un día para otro deja el sueño en 0 min exactos", () => {
-    // No es un bug del cálculo: los tres instantes son correctos y el embaldosado se mantiene.
-    // Es que la jornada de la víspera del viaje mide 16 h y no 24, y ahí no cabe dormir. El
-    // efecto de producto es correcto (déficit de 480 min, `SLEEP_DEBT`, techo NEUTRAL); lo que
-    // no se sostiene es la mitad ESTRICTA de la propiedad 1 tal como `05` la enuncia.
-    const jornadas = construirJornadas({
-      ventana: { desde: D("2026-08-03"), hasta: D("2026-08-05") },
-      perfil: {
-        baseTimezone: ZONA.MEDIANOCHE_SIN_DST,
-        defaultWakeLocal: T("07:00"),
-        defaultSleepLocal: T("23:00"),
-        sleepNeedMinutes: 480,
-      },
-      excepcionesDia: [],
-      overridesZona: [
-        {
-          during: { desde: I("2026-08-04T00:00:00Z"), hasta: I("2026-08-20T00:00:00Z") },
-          timezone: ZONA.DST_UE,
-        },
-      ],
-    });
-    const vispera = elemento(jornadas, 0);
-    expect(vispera.sueñoMinutes).toBe(0);
-    expect(vispera.sleep.equals(vispera.wakeSig)).toBe(true);
-    expect(vispera.déficitSueñoMinutes).toBe(480);
-    expect(vispera.techoEnergía).toBe("NEUTRAL");
-    // El embaldosado NO se rompe: es la única de las dos mitades que se sostiene siempre.
-    expect(vispera.wakeSig.equals(elemento(jornadas, 1).wake)).toBe(true);
   });
 });
 
@@ -277,18 +299,13 @@ describe("Propiedad 2 — la jornada dura 1440 min menos el salto de offset", ()
   const jornadasDelAño = (zona: string) =>
     construirJornadas({
       ventana: { desde: D("2026-01-01"), hasta: D("2027-01-01") },
-      perfil: {
-        baseTimezone: zona,
-        // 07:00 existe y es inequívoca los 365 días en las cuatro zonas: la propiedad supone
-        // que la hora de pared del `wake` no cae en un hueco de DST, donde `'compatible'` la
-        // desplazaría y la identidad dejaría de valer.
-        defaultWakeLocal: T("07:00"),
-        defaultSleepLocal: T("23:00"),
-        sleepNeedMinutes: 480,
-      },
+      // 07:00 existe y es inequívoca los 365 días en las cuatro zonas: la propiedad supone que
+      // la hora de pared del `wake` no cae en un hueco de DST, donde `'compatible'` la
+      // desplazaría y la identidad dejaría de valer.
+      perfil: perfilDe(zona, "07:00", "23:00"),
       excepcionesDia: [],
       overridesZona: [],
-    });
+    }).jornadas;
 
   it.each(ZONAS_ANUALES)("%s: 365 días consecutivos cumplen la identidad", (zona) => {
     const jornadas = jornadasDelAño(zona);
@@ -300,6 +317,8 @@ describe("Propiedad 2 — la jornada dura 1440 min menos el salto de offset", ()
       // Falla también si alguien calcula la jornada siguiente sumando 1440 min a la línea de
       // instantes en vez de un día de calendario: ahí la duración sería 1440 siempre.
       expect(duracion, `${zona} ${j.fecha.toString()}`).toBe(j.vigiliaMinutes + j.sueñoMinutes);
+      // Sin viajes no hay nada que recortar en ninguno de los 365 días.
+      expect(j.recorteVigiliaMinutes, `${zona} ${j.fecha.toString()}`).toBe(0);
     }
   });
 
@@ -319,38 +338,16 @@ describe("Propiedad 2 — la jornada dura 1440 min menos el salto de offset", ()
 });
 
 describe("Propiedad 3 — el suelo: vigilia y sueño no negativos", () => {
-  it("se cumple en todos los casos generados sin frontera de zona", () => {
+  it("se cumple en todos los casos generados, ahora sin ninguna condición", () => {
+    // Antes del acotado había que condicionar esta propiedad a que la jornada no cruzara una
+    // frontera de huso, porque `sueño` salía negativo. Con `sleep = min(sleep, wakeSig)` es
+    // cierta POR CONSTRUCCIÓN, y eso es lo que la devuelve a ser un suelo de verdad.
     for (const c of CASOS) {
       for (const j of c.jornadas) {
-        const zona = zonaEfectivaEn(j.fecha, c.overridesZona, c.zonaBase);
-        const zonaSig = zonaEfectivaEn(j.fecha.add({ days: 1 }), c.overridesZona, c.zonaBase);
         expect(j.vigiliaMinutes, rotulo(c, j)).toBeGreaterThanOrEqual(0);
-        if (zona === zonaSig) {
-          expect(j.sueñoMinutes, rotulo(c, j)).toBeGreaterThanOrEqual(0);
-        }
+        expect(j.sueñoMinutes, rotulo(c, j)).toBeGreaterThanOrEqual(0);
+        expect(j.recorteVigiliaMinutes, rotulo(c, j)).toBeGreaterThanOrEqual(0);
       }
     }
-  });
-
-  it("y NO se cumple cruzando una frontera de zona con salto suficiente: es el mismo hallazgo", () => {
-    // México (UTC−6) → Lord Howe (UTC+11) son 17 h de salto contra 8 h de sueño: la jornada de
-    // la víspera sale con sueño NEGATIVO, que ninguna fase posterior del motor sabe interpretar.
-    const jornadasDelViaje = construirJornadas({
-      ventana: { desde: D("2026-08-03"), hasta: D("2026-08-05") },
-      perfil: {
-        baseTimezone: ZONA.MEDIANOCHE_SIN_DST,
-        defaultWakeLocal: T("07:00"),
-        defaultSleepLocal: T("23:00"),
-        sleepNeedMinutes: 480,
-      },
-      excepcionesDia: [],
-      overridesZona: [
-        {
-          during: { desde: I("2026-08-04T00:00:00Z"), hasta: I("2026-08-20T00:00:00Z") },
-          timezone: ZONA.DST_MEDIA_HORA,
-        },
-      ],
-    });
-    expect(elemento(jornadasDelViaje, 0).sueñoMinutes).toBeLessThan(0);
   });
 });

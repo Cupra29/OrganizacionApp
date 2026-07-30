@@ -4,7 +4,9 @@ export type {
   EntradaJornadas,
   ExcepcionDia,
   Jornada,
+  JornadaDegenerada,
   PerfilTemporal,
+  SalidaJornadas,
   VentanaFechas,
 } from "./jornadas.ts";
 export { construirJornadas } from "./jornadas.ts";
