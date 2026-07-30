@@ -9,15 +9,15 @@
  * sano, con el núcleo entero sin proteger. Es exactamente el fallo que dejó la lección de
  * la fase 0 ("un guardrail que no se ha visto fallar es una intención").
  *
- * Cómo: escribe un canario en cada paquete con salida determinista, con las diecisiete formas
- * prohibidas y once legítimas, pasa Biome, y exige que las señaladas sean EXACTAMENTE las
+ * Cómo: escribe un canario en cada paquete con salida determinista, con las veinticuatro
+ * formas prohibidas y trece legítimas, pasa Biome, y exige que las señaladas sean EXACTAMENTE las
  * prohibidas. Los canarios se borran siempre, incluso si algo revienta; y si un fallo brusco
  * dejara alguno, el siguiente `pnpm lint` se pondría rojo, que es la dirección segura del
  * error.
  *
  * Las formas nuevas de la ampliación de ADR-018 §9 (`Temporal.Now`, zona ambiente,
- * `performance.now`) entraron el 2026-07-29, y el eje `globalThis` el 2026-07-30, con los
- * casos G1–G11 de
+ * `performance.now`) entraron el 2026-07-29, y los tres receptores prohibidos enteros
+ * (`globalThis`, `crypto`, `performance`) el 2026-07-30, con los casos G1–G11 de
  * `docs/qa/fase-1-guardrail-temporal-now.md`, escritos antes de la implementación. Los
  * controles negativos pesan lo mismo que los positivos: si el plugin sobre-bloqueara un uso
  * legítimo, la respuesta habitual sería silenciarlo entero con un `biome-ignore`, y entonces
@@ -97,11 +97,13 @@ const FORMAS = [
     caso: "G11",
   },
 
-  // El eje `globalThis`, que no está en el documento de QA: se aprobó el 2026-07-30, después
-  // de escribirlo. Un solo patrón los cubre a los seis, así que estas líneas son redundantes
-  // ENTRE SÍ mientras el patrón sea el identificador entero. Están una por una a propósito:
-  // son las formas que había que cerrar, y si alguien cambia el patrón por una lista de
-  // `globalThis.$miembro` el canario tiene que decir cuál de ellas dejó de cubrir.
+  // Los tres receptores prohibidos enteros, que no están en el documento de QA: se aprobaron
+  // el 2026-07-30, después de escribirlo. Un solo patrón por receptor cubre todas sus líneas,
+  // así que las de cada grupo son redundantes ENTRE SÍ mientras el patrón sea el identificador
+  // entero. Están una por una a propósito: son las formas que había que cerrar, y si alguien
+  // cambia un receptor por una lista de `$receptor.$miembro`, el canario tiene que decir cuál
+  // de ellas dejó de cubrir. `performance.now` ya lo demostró: estuvo cubierto en solitario un
+  // día entero mientras `performance.timeOrigin` pasaba limpio.
   { codigo: "export const prohibido12 = globalThis.Date.now();", prohibida: true },
   { codigo: "export const prohibido13 = globalThis.Math.random();", prohibida: true },
   { codigo: "export const prohibido14 = globalThis.performance.now();", prohibida: true },
@@ -111,6 +113,18 @@ const FORMAS = [
     prohibida: true,
   },
   { codigo: "export const prohibido17 = usaReloj(() => globalThis);", prohibida: true },
+
+  {
+    codigo: "export const prohibido18 = crypto.getRandomValues(new Uint8Array(1));",
+    prohibida: true,
+  },
+  { codigo: "export const prohibido19 = crypto.randomUUID();", prohibida: true },
+  { codigo: "export const prohibido20 = crypto.subtle;", prohibida: true },
+  { codigo: "export const prohibido21 = usaReloj(() => crypto);", prohibida: true },
+  // `performance.now()` no se repite aquí: ya está arriba como G5, que es el caso de QA.
+  { codigo: "export const prohibido22 = performance.timeOrigin;", prohibida: true },
+  { codigo: "export const prohibido23 = performance.getEntries().length;", prohibida: true },
+  { codigo: "export const prohibido24 = usaReloj(() => performance);", prohibida: true },
 
   { codigo: 'export const legitimo1 = new Date("2026-08-03T00:00:00Z");', prohibida: false },
   { codigo: "export const legitimo2 = Math.max(1, 2);", prohibida: false },
@@ -132,11 +146,16 @@ const FORMAS = [
     caso: "G8",
   },
   { codigo: "export const legitimo7 = reloj.Now();", prohibida: false, caso: "G9" },
-  // Los dos vecinos plausibles de `globalThis`. NO hay control negativo de un uso legítimo de
-  // `globalThis` porque no existe ninguno en estos cuatro paquetes: está razonado en el
-  // plugin y su ausencia es deliberada, no un olvido.
+  // Los vecinos plausibles de los tres receptores prohibidos enteros. NO hay control negativo
+  // de un uso legítimo de `globalThis`, `crypto` ni `performance` porque no existe ninguno en
+  // estos cuatro paquetes: está razonado en el plugin y su ausencia es deliberada, no un
+  // olvido. Un objeto propio con una propiedad llamada `crypto` SÍ dispararía; es el falso
+  // positivo aceptado, del mismo tipo que el de `resolvedOptions`, y por eso no está aquí:
+  // esta lista es de lo que debe pasar limpio, no de lo que se tolera.
   { codigo: 'export const legitimo8 = "globalThis".length;', prohibida: false },
   { codigo: "export const legitimo9 = { esGlobalThis: false };", prohibida: false },
+  { codigo: 'export const legitimo10 = "crypto".length;', prohibida: false },
+  { codigo: "export const legitimo11 = { esCrypto: false, rendimiento: 1 };", prohibida: false },
 ];
 
 const CANARIO = `${FORMAS.map(({ codigo }) => codigo).join("\n")}\n`;

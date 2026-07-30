@@ -26,6 +26,13 @@ const IO_EXTERNO = "drizzle-orm|fastify|pg|postgres|react|react-dom|axios|undici
 // Ese alcance incluye además `packages/ical`, que aquí NO aparece: entra por la
 // reproducibilidad del `.ics` (ADR-017), no por ausencia de I/O. Reparto: imports aquí,
 // globales allí.
+//
+// Ojo con esa asimetría, que deja una rendija conocida: como `ical` no está en `NUCLEO`,
+// `import { randomUUID } from "node:crypto"` le está permitido aquí, y el plugin solo para el
+// global `crypto`, no ese import. Un UID aleatorio rompería la reproducibilidad que ADR-017 le
+// exige. Hoy no ocurre —los UID salen de identificadores de entidad— pero cerrarlo es meter
+// `ical` en una regla de azar, y eso es una decisión sobre el alcance de ADR-017, no una
+// corrección de este comentario.
 const IO_NATIVO =
   "fs|fs/promises|http|https|net|dgram|dns|tls|child_process|cluster|worker_threads|readline|repl|crypto|timers|timers/promises|perf_hooks";
 
@@ -87,9 +94,12 @@ module.exports = {
         "proceso, y los objetos de una no los aceptan los métodos de la otra: falla en " +
         "ejecución por comprobación de ranura interna, no al compilar, y ningún test de un " +
         "solo paquete lo ve. Es el motivo por el que `rrule-temporal` se quedó en " +
-        "devDependency. (2) Es lo que hace que cambiar de polyfill, o pasar a `Temporal` " +
-        "nativo cuando llegue al LTS, cueste una línea. Hoy esta regla pasa sin hacer nada, " +
-        "porque hay exactamente un importador: por eso se pone hoy y no cuando haya dos.",
+        "devDependency. (2) Es lo que hace que cambiar de polyfill cueste una línea, y que " +
+        "pasar a `Temporal` nativo cuando llegue al LTS cueste un solo archivo — la forma " +
+        "exacta de esa migración, que NO es la obvia porque el guardrail prohíbe `globalThis`, " +
+        "está escrita y comprobada en la cabecera de ese archivo. Hoy esta regla pasa sin " +
+        "hacer nada, porque hay exactamente un importador: por eso se pone hoy y no cuando " +
+        "haya dos.",
       severity: "error",
       from: { path: "^(packages|apps)/", pathNot: "^packages/temporal/src/temporal\\.ts$" },
       to: { path: "node_modules/temporal-polyfill/" },
