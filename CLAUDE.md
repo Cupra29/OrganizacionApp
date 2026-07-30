@@ -49,7 +49,7 @@ Llegan en su fase y **no antes**: `test:integration` y `db:generate`/`db:migrate
 Todas las versiones viven en el `catalog:` de `pnpm-workspace.yaml`. No las cambies sin decirlo.
 
 Node **24** · pnpm **11.17.0** · TypeScript **6.0.x** · Vitest **4** · Biome **2.5.6** ·
-dependency-cruiser **18** · temporal-polyfill **1.0.2**
+dependency-cruiser **18** · temporal-polyfill **1.0.2** · rrule-temporal **2.0.2** (solo dev)
 
 - **No instales `typescript@latest`.** Hoy resuelve a 7.x, que no publica API programática y
   con el que `dependency-cruiser` no funciona: se perdería la frontera del motor entera. Ver
@@ -64,6 +64,10 @@ dependency-cruiser **18** · temporal-polyfill **1.0.2**
   `src/temporal.ts`. **Ningún otro archivo importa el polyfill.** Es lo que hace que cambiar de
   polyfill sea una línea, y `temporal-polyfill` se eligió sabiendo que no es el de los
   champions. Ver ADR-018.
+- **No instales `rrule`.** `rrule-temporal` es `devDependency` y solo oráculo diferencial de la
+  expansión. El motivo no es que `rrule` esté poco mantenido: devuelve `Date` cuyo significado
+  depende de la zona del proceso, lo que ningún guardrail de este repositorio puede ver y un CI
+  en UTC enmascara. Ver ADR-018.
 
 ## Dónde vive la documentación
 
@@ -82,7 +86,8 @@ dependency-cruiser **18** · temporal-polyfill **1.0.2**
 
 1. `packages/engine`, `packages/temporal` y `packages/domain` **no tienen dependencias de
    I/O**: ni base de datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un
-   parámetro. Son **dos mecanizaciones distintas y las dos están demostradas**:
+   parámetro, y **la zona horaria también**: en el núcleo no se lee nunca la del proceso.
+   Son **dos mecanizaciones distintas y las dos están demostradas**:
    `dependency-cruiser` cubre el I/O **importado**, y el plugin GritQL
    `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit` cubre `Date.now()`, `new Date()` sin
    argumentos y `Math.random()`, que son globales y no imports. `new Date(argumento)`,
@@ -90,10 +95,12 @@ dependency-cruiser **18** · temporal-polyfill **1.0.2**
    `packages/ical`, que no es I/O-libre por la misma razón sino porque su salida debe ser
    reproducible byte a byte (ADR-017). Que cada guardrail siga mirando lo que debe lo
    verifican `depcruise:cobertura` y `guardrail:cobertura`.
-   **Falta una tercera puerta, y hoy la sostienes tú:** adoptar `Temporal` (ADR-018) trae
-   `Temporal.Now`, que lee reloj y zona ambiente a la vez, y el plugin todavía no lo ve.
-   Tampoco ve `Intl.DateTimeFormat().resolvedOptions().timeZone` ni `performance.now`.
-   Mecanizarlo es entrega de la fase 1, dueño `engine-dev`.
+   **Prohibidas también, pero todavía NO mecanizadas — hoy esa mitad la sostienes tú:**
+   `Temporal.Now` (cualquier miembro), `Intl.DateTimeFormat().resolvedOptions().timeZone` y
+   `performance.now`. La primera llega con `Temporal` (ADR-018) y lee reloj y zona ambiente a
+   la vez. Ampliar el plugin es entrega de la fase 1, dueño `engine-dev`; los casos están
+   diseñados en `docs/qa/fase-1-guardrail-temporal-now.md`. Hasta que `pnpm verify` las vea
+   fallar, son una intención.
 2. El validador del motor **no importa nada del módulo de colocación**. La duplicación es
    deliberada: si compartieran utilidades, la validación sería una tautología.
 3. **Ningún campo que registre, insinúe o permita inferir información médica.** Las
@@ -140,6 +147,21 @@ motivacional, ni rellenar cada minuto disponible del día.
   cambio de horario dura lo que dura; `WKST=MO` en toda expansión, y `week_starts_on` es
   **pura presentación** — no llega nunca al expansor, porque haría que *qué instancias existen*
   dependiera de un ajuste de visualización.
+- **Zonas de referencia para fixtures. No son intercambiables** (detalle en `07 §4.E`):
+
+  | Zona | Para qué |
+  |---|---|
+  | `America/Mexico_City` | Medianoche **aislada** de DST: separa los dos bugs, que son distintos |
+  | `America/Chicago` | Jornadas de 23 h/25 h. Transiciones 2026: **03-08** y **11-01** |
+  | `Europe/Madrid` | Horas inexistentes y ambiguas (02:30). Con regla UE, hueco **y** pliegue caen en 02:00–02:59; con regla de EE. UU. no. Transiciones 2026: **03-29** y **10-25** |
+  | `Australia/Lord_Howe` | Salto de **30 min**. Un motor que asuma 60 pasa todo lo demás |
+  | `Asia/Kolkata` | Offset no entero (+05:30) |
+
+  **`America/Mexico_City` no sirve para ninguna fixture de cambio de horario**: México suprimió
+  el horario de verano en 2022 y su tzdata no tiene transiciones futuras. Un test de «02:30
+  ambigua» escrito con ella pasa en verde **con un motor que no implemente desambiguación en
+  absoluto** — y es la zona de ejemplo en `02`, `04` y ADR-003, así que la trampa es fácil de
+  pisar.
 
 ## Git
 
