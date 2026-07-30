@@ -10,6 +10,11 @@ allowBuilds: []
 # y no una versión literal, así que no puede haber deriva entre ellos.
 catalog:
   '@biomejs/biome': 2.5.6
+  # Proveedor de cobertura. Entra en la fase 1 porque el umbral de ramas >= 95 % de
+  # `packages/temporal` es criterio de aceptación y se declara en el vitest.config.ts RAÍZ
+  # (en Vitest 4 la cobertura es configuración de raíz, no de proyecto). Va atado a la misma
+  # versión que `vitest`: el proveedor y el runner se publican en lote.
+  '@vitest/coverage-v8': ^4.1.10
   dependency-cruiser: ^18.1.0
   # Oráculo diferencial de la expansión de recurrencia, NO implementación: se queda en
   # devDependency. Su `temporal-impl` resuelve `globalThis.Temporal ?? polyfill` sobre un
