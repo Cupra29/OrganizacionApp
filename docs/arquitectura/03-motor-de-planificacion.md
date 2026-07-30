@@ -101,9 +101,10 @@ error de diseño que lleva a "generar un calendario que fracasará".
 función construirJornadas(ventana, perfil, excepcionesDia, overridesZona):
     jornadas = []
     para cada fecha local d en ventana:
-        zona    = zonaEfectivaEn(d, overridesZona, perfil.baseTimezone)
+        zona    = zonaEfectivaEn(d,   overridesZona, perfil.baseTimezone)
+        zonaSig = zonaEfectivaEn(d+1, overridesZona, perfil.baseTimezone)   // ← ojo: d+1
         wake    = instante(d,    excepcionDe(d)?.wakeLocal  ?? perfil.defaultWakeLocal,  zona)
-        wakeSig = instante(d+1,  excepcionDe(d+1)?.wakeLocal ?? perfil.defaultWakeLocal, zona)
+        wakeSig = instante(d+1,  excepcionDe(d+1)?.wakeLocal ?? perfil.defaultWakeLocal, zonaSig)
         sleep   = instante(d,    excepcionDe(d)?.sleepLocal ?? perfil.defaultSleepLocal, zona)
         si sleep <= wake:  sleep = sleep + 1 día     // cruza medianoche: caso NORMAL
         jornadas.push({ id: índice, wake, sleep, wakeSig,
@@ -116,6 +117,26 @@ Todo el manejo de medianoche vive en la línea `si sleep <= wake`. A partir de a
 otra parte del motor vuelve a razonar sobre horas locales: opera con instantes absolutos.
 Ese confinamiento es intencional — es la única forma de que los bugs de medianoche no se
 repartan por todo el código.
+
+> **Corregido el 2026-07-29: `zonaSig`.** Este pseudocódigo calculaba `wakeSig` con la zona
+> efectiva en `d`, no en `d+1`. Con un viaje que empieza en `d+1`, el `wakeSig` de la jornada `d`
+> caía a las 07:00 de la zona **de origen** mientras que el `wake` de la jornada `d+1` caía a las
+> 07:00 de la zona **de destino**: las dos jornadas dejaban de encajar y la línea de tiempo
+> quedaba con un hueco —o un solape— de la anchura de la diferencia de offsets. Ahí se pierde o se
+> duplica capacidad, sin que nada lo señale.
+>
+> Lo destapó la pregunta *"¿qué propiedad no trivial tiene la construcción de jornadas?"* al
+> sustituir la property test tautológica de la fase 1 (auditoría de `qa-engineer`,
+> [`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md) §2). La propiedad que
+> reemplaza a la tautología es precisamente `∀ i: jornada[i].wakeSig == jornada[i+1].wake`, y este
+> defecto es el primer fallo que habría cazado. Escrito el criterio, apareció el bug: la property
+> test correcta no solo prueba mejor, obliga a pensar la invariante.
+>
+> **Queda un residuo sin decidir**, y no se decide aquí porque no hay caso delante: un
+> `timezone_overrides` cuya frontera cae **dentro** de una jornada (viaje que empieza a mediodía).
+> Este pseudocódigo asigna una sola zona a `wake` y `sleep`, así que ese caso sigue mal modelado.
+> La property test lo señalará el día que aparezca una fixture así, que es la forma correcta de
+> encontrarlo.
 
 **Aritmética del sueño como restricción dura:**
 

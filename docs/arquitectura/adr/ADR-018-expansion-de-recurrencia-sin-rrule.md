@@ -154,11 +154,29 @@ fallo. El RFC decide esto, así que no es una elección nuestra.
   ambiguas (atraso: se toma la primera). Entra como constante nombrada de la etapa 2, no
   esparcida por las llamadas. Ni RFC 5545 ni ninguna de las dos bibliotecas documenta qué hacen
   aquí; nosotros lo documentamos y lo probamos.
-- **`duration_minutes` son minutos reales sobre la línea de instantes**, no hora de pared. Un
-  turno de 720 min que empieza a las 19:00 el día del cambio de horario **termina a otra hora
-  local** ese día. Se sigue de ADR-003 (la capacidad se mide en instantes absolutos y una jornada
-  con cambio mide 23 h o 25 h). En `Temporal` es `zdt.add({ minutes })`; la trampa a evitar es
+- **`duration_minutes` son minutos reales sobre la línea de instantes**, no hora de pared. Se
+  sigue de ADR-003 (la capacidad se mide en instantes absolutos y una jornada con cambio mide 23 h
+  o 25 h). En `Temporal` es `zdt.add({ minutes })`; la trampa a evitar es
   `zdt.toPlainDateTime().add(...).toZonedDateTime(...)`, que da la otra respuesta.
+
+  > **Nota fechada (2026-07-29) — el ejemplo que ilustraba esta regla era defectuoso; la regla no
+  > cambia.** Decía: *"un turno de 720 min que empieza a las 19:00 **el día** del cambio de horario
+  > termina a otra hora local ese día"*. `qa-engineer` lo auditó
+  > ([`docs/qa/fase-1-nucleo-temporal.md`](../../qa/fase-1-nucleo-temporal.md) §2, hallazgo 4) y
+  > tiene razón: en cualquier regla real la transición ocurre de madrugada, así que un turno que
+  > arranca a las 19:00 de ese mismo día civil **ya la dejó atrás y no cruza nada**. Terminaría a
+  > las 07:00, que es exactamente lo que produce la trampa de conversión — el ejemplo no
+  > distinguía la implementación correcta de la incorrecta, que era todo su propósito.
+  >
+  > **El ejemplo correcto es la noche anterior.** Con `America/Chicago` y el adelanto del
+  > 2026-03-08: inicio 2026-03-07 19:00 CST = `2026-03-08T01:00:00Z`, fin `2026-03-08T13:00:00Z` =
+  > **08:00 CDT**, frente a las 07:00 que da la aritmética de pared. Ese es el par de valores que
+  > discrimina, y es el que está en el criterio de aceptación de la fase 1.
+  >
+  > Se corrige como nota aditiva y no con un ADR de reemplazo porque **la decisión —minutos reales
+  > sobre la línea de instantes— es la misma**; lo que falló fue el caso elegido para
+  > demostrarla. Un ejemplo que no discrimina es un defecto real, del mismo tipo que el 4×3
+  > insatisfacible, y por eso queda escrito en vez de sustituido en silencio.
 - **`UNTIL` se compara como instante**, nunca como fecha local.
 - **`effective_from` / `effective_until`** son columnas `date` sin zona, y ADR-003 prohíbe una
   fecha civil sin zona: se interpretan en `recurrence_rules.timezone`, que está en la misma fila.

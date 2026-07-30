@@ -20,8 +20,11 @@ los ADRs en `docs/adr/`, rutas y stack que no corresponden a este proyecto.
 
 **Nota, resuelta el 2026-07-29:** el bloque original mencionaba versiones y comandos que no
 existían. Al cerrar la fase 0 se confirmaron unos y se descubrió que otros **no debían
-crearse**. La actualización que corrige eso está en la §3 de este documento, al final: es lo
-que hay que aplicar a `CLAUDE.md` ahora.
+crearse**. La actualización que corrige eso está en la §3 de este documento.
+
+**Pendiente de aplicar (2026-07-29):** la **§4**, con lo que sale de ADR-018 y de la auditoría de
+criterios de la fase 1. Su bloque **D2 supera al D de la §3**; el resto es aditivo. Lo aplica el
+usuario, no un agente.
 
 ---
 
@@ -219,4 +222,67 @@ el reloj está cubierto mecánicamente, y no lo está.
    **imports**. `Date.now()`, `new Date()` y `Math.random()` son globales, no módulos: **hoy no
    los detecta nadie.** Mecanizarlo es entrega de la fase 1, dueño `engine-dev`. Hasta
    entonces, esa mitad de la regla la sostienes tú, no la herramienta.
+```
+
+---
+
+## 4. Actualización tras decidir la dependencia temporal (2026-07-29) — bloques a aplicar
+
+Salen de [ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md) y de la auditoría de
+criterios de `qa-engineer`. **El bloque D de la §3 queda superado por el D2 de aquí**: se escribió
+antes de que existiera el plugin GritQL y antes de saber que `Temporal.Now` también hay que
+vigilarlo. Si aún no se ha aplicado el D, aplíquese directamente el D2.
+
+### D2. Sustituye el límite nº 1 de "Límites que no se cruzan"
+
+```markdown
+1. `packages/engine` y `packages/temporal` **no tienen dependencias de I/O**: ni base de
+   datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un parámetro. Y **la zona
+   horaria también es un parámetro**: en el núcleo no se lee nunca la zona del proceso.
+   `dependency-cruiser` sostiene la mitad de imports y **está demostrado que salta**; la otra
+   mitad la sostiene el plugin GritQL `sin-reloj-ni-azar-en-nucleo.grit`, con
+   `pnpm guardrail:cobertura` verificando que sigue viendo los cuatro paquetes del alcance
+   (`engine`, `temporal`, `domain`, `ical` — este último por ADR-017). Formas prohibidas:
+   `Date.now`, `Math.random`, `new Date()`, `Temporal.Now` (cualquier miembro),
+   `Intl.DateTimeFormat().resolvedOptions().timeZone` y `performance.now`. Permitidas y no
+   disparan: `new Date(argumento)`, `Math.max`, `Math.floor`.
+```
+
+### E. Añade a `## Convenciones de dominio`
+
+Es el bloque que más pesa de los cuatro: sin la advertencia de la zona, la fixture de cambio de
+horario se escribe con `America/Mexico_City` y **pasa en verde sin ejercitar nada**.
+
+```markdown
+- **`Temporal` se importa siempre desde `@oa/temporal`**, que lo reexporta desde su único módulo
+  `src/temporal.ts`. Ningún otro archivo del monorepo importa el polyfill: es lo que hace que
+  cambiarlo, o pasar a `Temporal` nativo cuando llegue al LTS, sea una línea (ADR-018).
+- **Políticas horarias, elegidas y no heredadas** (ADR-018 §4): desambiguación `'compatible'`
+  (hora inexistente → se desplaza adelante; ambigua → la primera); las duraciones son **minutos
+  reales sobre la línea de instantes**, nunca hora de pared; `WKST` es siempre `MO` en la
+  expansión y `week_starts_on` es **solo presentación** — si llega al expansor, cambiar un ajuste
+  de visualización cambiaría qué instancias existen y dejaría huérfanas las excepciones.
+- **Zonas de referencia para fixtures. No son intercambiables:**
+
+  | Zona | Para qué | Por qué esta |
+  |---|---|---|
+  | `America/Mexico_City` | Aritmética de medianoche **aislada** de DST | Sin transiciones: separa el bug de medianoche del bug de horario de verano, que son distintos |
+  | `America/Chicago` | Jornadas de 23 h/25 h, turno que cruza la transición | Transiciones 2026 verificables a mano: **2026-03-08** (adelanto) y **2026-11-01** (atraso) |
+  | `Europe/Madrid` | Horas locales inexistentes y ambiguas (02:30) | En la regla de la UE el hueco **y** el pliegue caen los dos en 02:00–02:59; en la de EE. UU. no. Transiciones 2026: **2026-03-29** y **2026-10-25** |
+  | `Australia/Lord_Howe` | Salto de **30 min** | Un motor que asuma que el DST siempre son 60 min pasa todo lo demás |
+  | `Asia/Kolkata` | Offset no entero (+05:30) | Nombrada en 03 §10.3 sin fixture propia |
+
+  **`America/Mexico_City` no sirve para ninguna fixture de cambio de horario**: México suprimió el
+  horario de verano en 2022 y su tzdata no tiene transiciones futuras. Un test de "02:30 ambigua"
+  escrito con ella pasa en verde **con un motor que no implemente desambiguación en absoluto**. Es
+  la zona de ejemplo en 02, 04 y ADR-003, así que la trampa es fácil de pisar.
+```
+
+### F. Añade a `## Versiones y convenciones de compilación`
+
+```markdown
+- `temporal-polyfill` **1.0.2** (producción) · `rrule-temporal` **2.0.2** (solo `devDependency`,
+  oráculo diferencial de la expansión). **No `rrule`**, y no por estar poco mantenido: devuelve
+  `Date` cuyo significado depende de la zona del proceso, lo que ningún guardrail de este
+  repositorio puede ver y un CI en UTC enmascara. Ver ADR-018.
 ```

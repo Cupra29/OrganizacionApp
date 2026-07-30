@@ -217,6 +217,15 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
 - Sigue en pie: **no** `moment`, **no** `date-fns` con zonas.
 
 **Criterio de aceptación**
+
+> **Zonas de referencia — no son intercambiables.** Cada criterio de abajo nombra su zona a
+> propósito; ver [07 §4.E](./07-convenciones-propuestas.md) para la tabla y el motivo.
+> `America/Mexico_City`, que es la zona de ejemplo en 02, 04 y ADR-003, **no sirve para ninguna
+> fixture de cambio de horario**: México suprimió el horario de verano en 2022 y su tzdata no
+> tiene transiciones futuras, así que un test de 02:30 ambiguo escrito con ella pasaría en verde
+> **con un motor que no implemente `disambiguation` en absoluto**. Sí es la zona correcta para
+> aislar la aritmética de medianoche del DST, que son dos bugs distintos.
+
 - **Fixture representativa (Q13):** un turno rotativo de **ciclo desalineado de la semana civil**
   anclado el 2026-08-03 expande 8 semanas civiles **distintas entre sí**, y la **semana 9 vuelve a
   ser igual que la 1**. Se usa un ciclo de **8 días** (4 de trabajo / 4 de descanso) porque es el
@@ -241,24 +250,122 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   > Se conservan las dos fixtures, y **Q13 (resuelta el 2026-07-29) decidió cuál manda**: el turno
   > real está desalineado, así que la desalineada es la representativa y la de 7 días queda como el
   > caso del brief. Ambas empiezan en 2026-08-03, que es lunes.
-- Una jornada que cruza un cambio de horario mide 23 h o 25 h reales, no 24.
-- Un turno de 720 min que empieza a las 19:00 el día del cambio de horario **termina a otra hora
-  local** ese día: la duración son minutos reales sobre la línea de instantes, no hora de pared
-  (ADR-018 §4).
-- Una regla `FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR` anclada en miércoles produce el conjunto
-  correcto: las semanas activas se cuentan **desde la semana del ancla** con `WKST=MO`, no
-  sumando 14 días a cada ocurrencia, y `COUNT` cuenta el conjunto fusionado en orden. Son los dos
-  errores clásicos de una implementación propia (ADR-018 §5) y los dos casos donde el oráculo
-  diferencial gana su sitio.
-- Una regla a las 02:30 local en un día de adelanto de reloj resuelve a 03:30 y no falla
-  (`disambiguation: 'compatible'`); en un día de atraso toma la **primera** de las dos.
-- El validador **rechaza** `BYSETPOS`, `BYMONTHDAY`, `WKST`, `BYDAY` con prefijo numérico y
-  `FREQ=MONTHLY;BYDAY=MO`, cada uno con un error que nombra la propiedad.
+- Una jornada que cruza un cambio de horario mide 23 h o 25 h reales, no 24. **Con
+  `America/Chicago`**: la jornada del 2026-03-07 (wake 07:00, sleep 23:00) mide **1380 min** y la
+  del 2026-10-31 mide **1500 min**, comparadas contra instantes UTC exactos.
+- **Un turno de 720 min que empieza a las 19:00 de la noche ANTERIOR a la transición termina a
+  las 08:00 locales, no a las 07:00.** Con `America/Chicago` y el adelanto del 2026-03-08:
+  inicio `2026-03-08T01:00:00Z`, fin `2026-03-08T13:00:00Z`, que es 08:00 CDT. La duración son
+  minutos reales sobre la línea de instantes, no hora de pared (ADR-018 §4).
+
+  > **Corregido el 2026-07-29** tras la auditoría de `qa-engineer`
+  > ([`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md) §2, hallazgo 4). Este
+  > criterio decía *"que empieza a las 19:00 **el día** del cambio de horario"*, y así era
+  > **satisfacible por accidente**: en cualquier regla real la transición ocurre de madrugada, así
+  > que un turno que arranca a las 19:00 de ese mismo día ya la ha dejado atrás y no cruza nada.
+  > Terminaba a las 07:00 — exactamente lo que da la suma ingenua de 12 h en hora de pared —, así
+  > que el criterio no distinguía una implementación correcta de una que ignora el DST por
+  > completo. La noche anterior sí lo distingue: 08:00 frente a 07:00.
+- Una regla `FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR;COUNT=8` con `anchor_date = 2026-08-05`
+  (miércoles) produce **exactamente** este conjunto, en este orden: `2026-08-05, 2026-08-07,
+  2026-08-17, 2026-08-19, 2026-08-21, 2026-08-31, 2026-09-02, 2026-09-04`. Nótese que el lunes
+  2026-08-03 **no** está: es de la semana activa del ancla pero anterior al ancla. Las semanas
+  activas se cuentan desde la semana del ancla con `WKST=MO`, no sumando 14 días a cada
+  ocurrencia, y `COUNT` corta el conjunto ya fusionado en orden cronológico. Son los dos errores
+  clásicos de una implementación propia (ADR-018 §5) y el caso donde el oráculo diferencial gana
+  su sitio.
+
+  > **Concretado el 2026-07-29** (misma auditoría, hallazgo 2). El criterio describía el mecanismo
+  > correcto pero no fijaba ancla, `COUNT` ni conjunto esperado: **cualquier salida lo "pasaba"**
+  > por no haber nada contra lo que compararla. Un criterio sin poder discriminante es del mismo
+  > tipo de defecto que el 4×3 insatisfacible, solo que por omisión de datos.
+- **Con `Europe/Madrid`** y `start_local = 02:30`: la ocurrencia del **2026-03-29** (adelanto)
+  resuelve a `2026-03-29T01:30:00Z` (03:30 CEST — desplazada adelante los 60 min del hueco) y la
+  del **2026-10-25** (atraso) a `2026-10-25T00:30:00Z`, que es la **primera** de las dos 02:30, no
+  `01:30:00Z`. `disambiguation: 'compatible'`, y ninguna de las dos falla.
+
+  > **Corregido el 2026-07-29** (misma auditoría, hallazgo 3). El criterio usaba la misma hora
+  > nominal —02:30— para el adelanto y el atraso **sin nombrar zona**, y eso solo es cierto donde
+  > la transición ocurre a la 01:00 UTC en los dos sentidos, como en la UE: ahí el hueco y el
+  > pliegue caen los dos en la franja local 02:00–02:59. Con una regla estadounidense
+  > (`America/Chicago`) el hueco cae en 02:00–02:59 pero el pliegue en 01:00–01:59, así que "02:30
+  > en el día de atraso" sería una hora de invierno perfectamente normal y **la mitad del criterio
+  > no ejercitaría nada**. La zona no era un detalle de la fixture: era parte del criterio.
+- El validador **rechaza cada fila de la columna "Rechazado" de ADR-018 §3**, un caso por forma y
+  con un error que nombra la propiedad exacta. Los que más fácilmente se olvidan por no ser
+  obvios: `FREQ=YEARLY;BYDAY=MO` (no solo `MONTHLY`), `COUNT` y `UNTIL` juntos, `UNTIL` como fecha
+  civil sin zona, `BYDAY=-1FR` (el signo no es una vía de escape) e `INTERVAL` igual a `0`, `-1` o
+  `1.5`. Y **`anchor_date` que no pertenece al conjunto que la regla genera** se rechaza en vez de
+  corregirse sola al día más cercano (ADR-018 §6, que existe precisamente para eliminar la
+  ambigüedad del `DTSTART` no sincronizado).
+- `FREQ=MONTHLY` con `anchor_date = 2026-01-31` y `COUNT=4` produce `2026-01-31, 2026-03-31,
+  2026-05-31, 2026-07-31`: febrero y abril **se omiten**, no se recortan al último día del mes
+  (RFC 5545 §3.3.10).
+- `effective_until = 2026-08-17` (lunes) **incluye** la ocurrencia de ese mismo día; y cuando la
+  regla trae además `UNTIL`, manda el más restrictivo de los dos, probado en las dos direcciones.
 - Un cronotipo con pico 22:00–01:00 produce una franja `PEAK` contigua que atraviesa
-  medianoche, sin partirse en dos.
+  medianoche, sin partirse en dos. **Verificación mecánica**: el instante de la medianoche local
+  no aparece en la estructura devuelta ni como frontera entre dos entradas del mismo `tier` ni
+  como dos entradas separadas — "contigua" tiene que ser comprobable, no visual.
 - Una excepción creada antes de un cambio de horario sigue apuntando a la instancia correcta
   después.
-- Property test: `∀ jornada: sueño + vigilia == nextWake − wake`, exacto al minuto.
+- **Álgebra de intervalos, con la semántica semiabierta `[inicio, fin)` que usa la constraint de
+  exclusión de [02 §6.2](./02-modelo-de-datos.md)**: dos intervalos contiguos **no** se solapan
+  (`[09,10)` y `[10,11)` → `false`); unir solapados y contiguos colapsa a uno; restar produce los
+  huecos **sin emitir huecos de duración cero** cuando lo ocupado toca exactamente `wake` o
+  `sleep`; un intervalo degenerado (duración 0, que una excepción `OVERRIDE` con
+  `new_duration_minutes = 0` produce legítimamente) no ocupa tiempo ni genera hueco espurio. Si el
+  motor y la base de datos discrepan en qué es un solape, la garantía de cero solapes se cae por
+  el lado que nadie está mirando.
+- **Los tres valores de `anchor` contra una ventana de `timezone_overrides` activa**, con un viaje
+  a `Europe/Madrid`: `SUSPEND_WHEN_AWAY` → la ocurrencia **está ausente** de la salida, no movida
+  ni marcada como cancelada; `FIXED_ZONE` → mismo instante UTC que sin viaje, sin consultar los
+  overrides; `LOCAL_WHEREVER` → misma hora de pared en la zona del override. Más una propiedad:
+  **ninguna combinación de overrides produce un cuarto comportamiento**.
+- **Una excepción cuyo `recurrence_id` no casa con ninguna instancia se reporta en un campo
+  explícito de la salida** y la ocurrencia real se genera con normalidad. No se aplica por
+  proximidad, no lanza, no desaparece. Dos variantes: una huérfana por offset equivocado (`08:00Z`
+  donde la instancia real es `07:00Z`) y una que nunca correspondió a nada (un martes en una regla
+  de lunes). Es la garantía textual de ADR-018 §7.
+
+  > **Tres criterios nuevos, añadidos el 2026-07-29** tras la auditoría de `qa-engineer`
+  > (hallazgos 5 y 6 y punto 3 de su §4). No eran criterios mal redactados: **eran tres entregas
+  > comprometidas en el párrafo de arriba sin una sola línea que las cubriera**. Se podía entregar
+  > `packages/temporal` sin una prueba de unión, resta ni solape, sin ejercitar ninguno de los tres
+  > valores de `anchor` —que ADR-003 trata como puerta de una sola dirección— y sin verificar el
+  > "nunca descarte silencioso" que ADR-018 §7 exige, y aun así satisfacer el criterio completo.
+  > Casos con valores exactos en [`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md)
+  > §3.3, §3.6 y §3.7.
+- **Property test 1 — las jornadas embaldosan la línea de tiempo:**
+  `∀ i: jornada[i].wakeSig == jornada[i+1].wake` (instante exacto), y
+  `jornada.wake < jornada.sleep < jornada.wakeSig` estrictamente. Falla si hay un minuto que
+  pertenece a dos jornadas o a ninguna, y **falla también con una jornada degenerada**
+  (`wake == sleep == wakeSig`).
+- **Property test 2 — la duración de la jornada es 1440 min menos el salto de offset:**
+  para un horario local fijo, `∀ jornada: wakeSig − wake == 1440 − (offsetMin(wakeSig) −
+  offsetMin(wake))`, sobre 365 días consecutivos en `America/Chicago`, `Europe/Madrid`,
+  `Australia/Lord_Howe` (transición de **30 min**) y `America/Mexico_City` (sin DST). Falla si la
+  jornada siguiente se calcula sumando 1440 minutos en la línea de instantes en vez de un día de
+  calendario.
+- Property test 3: `∀ jornada: vigilia >= 0 ∧ sueño >= 0`. Es el suelo, no el techo: lo
+  interesante son las dos de arriba.
+
+  > **Sustituyen a un criterio tautológico, corregido el 2026-07-29** tras la auditoría de
+  > `qa-engineer` ([`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md) §2,
+  > hallazgo 1). Decía: *"`∀ jornada: sueño + vigilia == nextWake − wake`, exacto al minuto"*. Como
+  > [ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) **define** sueño y vigilia como
+  > `nextWake − sleep` y `sleep − wake`, la suma es `nextWake − wake` **por álgebra, para tres
+  > instantes cualesquiera**: la satisface un motor con un desfase de una hora por DST, uno que
+  > ignora la zona, y una jornada de longitud cero. Era el único *property test* declarado de la
+  > fase y **no podía fallar** — el defecto simétrico del 4×3 insatisfacible.
+  >
+  > Las tres de arriba tienen contenido. La primera es la que **de verdad** afirma ADR-003 regla 1
+  > y nadie había escrito: que `[wake, nextWake)` **particiona** la línea de tiempo, sin huecos ni
+  > solapes. Si se rompe, la capacidad se cuenta dos veces o se pierde, que es el fallo más caro
+  > posible en F1. La segunda convierte el criterio de 23 h/25 h de dos fechas elegidas a mano en
+  > una propiedad sobre todo el año y todas las zonas, incluidas las de salto de media hora. No es
+  > un oráculo independiente —usa los offsets del mismo polyfill—, y por eso las fixtures de valor
+  > exacto siguen siendo necesarias; pero discrimina el bug principal.
 - Cobertura de ramas ≥ 95 % en este paquete (el único con umbral obligatorio). Se declara como
   umbral por glob en el `vitest.config.ts` **raíz**: en Vitest 4 la cobertura es configuración
   de raíz, no de proyecto.
