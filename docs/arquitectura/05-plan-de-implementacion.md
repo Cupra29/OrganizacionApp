@@ -429,8 +429,21 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   con las franjas espejadas. **Test antisesgo**: si difieren, hay un `if` que favorece a un
   cronotipo.
 - Un día con déficit de sueño queda marcado con `prohibeFocoNocturno` y `techoEnergía`.
-- Un compromiso `HIGH` con arrastre de 90 min degrada la energía del hueco siguiente, y sin
-  el arrastre no lo hace.
+- **Una tarde libre con pico 22:00–01:00 produce UN hueco con TRES segmentos de energía**
+  (`NEUTRAL → PEAK → NEUTRAL`), no tres huecos ni un hueco con un `tier` único. El perfil es una
+  partición exacta del hueco: contigua, sin solapes, sin segmentos de duración cero. **Y la
+  medianoche local no aparece como frontera de segmento**, porque `22:00–01:00` es una sola franja
+  (03 §3.2).
+- **`FRAGMENTATION_RISK` no sube por segmentar.** El mismo fixture, con y sin franja de pico
+  declarada, da el **mismo** valor de fragmentación: la métrica cuenta huecos, no segmentos. Un día
+  entero con tres niveles de energía no está fragmentado — nada lo interrumpe.
+- Un compromiso `HIGH` con arrastre de 90 min degrada **solo los primeros 90 minutos** del hueco
+  siguiente, no el hueco completo. Un hueco de cuatro horas que empieza un minuto antes de que
+  expire el arrastre conserva `PEAK` en 3 h 59 min. Sin arrastre declarado, no degrada nada.
+- Un `capacity_modifier` `NONE` de 30 min dentro de un hueco de cuatro horas descuenta **30
+  minutos** de `assignableMinutes`, no cuatro horas, y **el tiempo sigue siendo colocable para
+  bloques que no requieren foco** — no es indisponibilidad
+  ([ADR-011](./adr/ADR-011-privacidad-por-diseno.md) §2 separa las dos cosas).
 
 **Desbloquea** la fase 4 y —esto es lo importante— **una demo con valor real**. Si hubiera que
 cortar el proyecto aquí, lo entregado ya resuelve la causa nº3 del brief.
@@ -463,6 +476,17 @@ La fase de mayor riesgo técnico.
   un sacrificio `BELOW_LONG_BLOCK` que lo explique. Nunca fragmentos diarios.
 - Fixture 19: con 10+ objetivos, el corte se produce donde predice [ADR-015] (por escasez de
   plazas de colocación, no por el filtro de presupuesto).
+- **El cronotipo se cumple de verdad, y esto es nuevo:** un bloque de foco de 90 min en una tarde
+  libre de cuatro horas con pico de 22:00 a 01:00 **se coloca dentro del pico**, no al principio
+  del hueco. Sale de la puntuación —media ponderada por minutos sobre los segmentos que el bloque
+  toca— y no de una regla nueva (03 §5.3). Espejado a un pico de 05:00–08:00, el resultado es
+  equivalente: sigue siendo el test antisesgo.
+- **Un pico de 45 min no se pierde**: un bloque de 90 min se coloca a caballo y cobra por los 45
+  minutos de pico que cubre. Es el caso que un troceo del hueco habría vuelto incolocable, y por el
+  que se descartó trocear.
+- **El número de plazas de colocación es el mismo que predice [ADR-015]** aunque los huecos tengan
+  perfil segmentado: las restricciones duras nº 1 y nº 2 siguen midiendo el **hueco**, no el
+  segmento. Si este criterio falla, el tope emergente se ha movido y ADR-015 necesita revisión.
 - La tasa de fallo del validador sobre los 1000 casos generados es **cero**.
 - El motor resuelve una ventana de 14 días con 6 objetivos y 40 compromisos en < 500 ms.
 

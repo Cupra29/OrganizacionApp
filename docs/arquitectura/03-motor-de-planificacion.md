@@ -154,6 +154,9 @@ deadline solo cabe sacrificando sueño, el resultado correcto es `INFEASIBLE`.
 
 ### 3.2 Huecos libres con nivel de energía
 
+**Un hueco es un tramo de tiempo libre contiguo. Un hueco no tiene un nivel de energía: tiene un
+perfil de energía.** Las dos cosas se calculan en pasos separados y solo la primera corta.
+
 ```
 función calcularHuecos(jornada, compromisos, transiciones, bienestarFijo):
     ocupado = []
@@ -163,40 +166,109 @@ función calcularHuecos(jornada, compromisos, transiciones, bienestarFijo):
             ocupado.push(intervaloDe(t, c))      // antes o después según el tipo
     huecos = restar(intervalo(jornada.wake, jornada.sleep), unir(ocupado))
     para cada hueco h:
-        h.tier = nivelEnergía(h, franjasEnergía, jornada)
+        h.perfilEnergía = segmentarEnergía(h, franjasEnergía, compromisos, modificadores, jornada)
     devolver huecos
 ```
 
-**Nivel de energía de un hueco** — aquí está la implementación del cronotipo y del arrastre:
+**Solo el tiempo ocupado corta un hueco.** Nada de lo que afecta a la *calidad* del tiempo —una
+franja de energía, el arrastre de un compromiso pesado, un modificador de capacidad, el techo por
+deuda de sueño— parte un hueco en dos, porque **ninguna de esas cosas interrumpe nada**: la
+persona puede trabajar de 21:45 a 23:15 sin levantarse aunque su pico empiece a las 22:00.
+
+**Perfil de energía de un hueco** — aquí está la implementación del cronotipo y del arrastre:
 
 ```
-función nivelEnergía(hueco, franjas, jornada):
-    base = franjaQueContiene(hueco).tier         // PEAK | NEUTRAL | LOW
-    // Arrastre de compromisos pesados (la variante "persona que imparte clases")
-    para cada compromiso c con energyCost = HIGH que termina antes del hueco:
-        si hueco.inicio < c.fin + c.drainsAfterMinutes:
-            base = degradar(base)                // PEAK->NEUTRAL, NEUTRAL->LOW
-    // Deuda de sueño
-    si jornada.techoEnergía:  base = min(base, jornada.techoEnergía)
-    // Modificador de capacidad declarado por el usuario
-    si modificadorActivo(hueco) = NONE:      devolver SIN_FOCO
-    si modificadorActivo(hueco) = REDUCED:   base = min(base, LOW)
-    devolver base
+retículo de niveles:  SIN_FOCO < LOW < NEUTRAL < PEAK
+                      toda influencia es un MÍNIMO: ninguna sube el nivel, solo lo baja.
+                      SIN_FOCO es CALCULADO y no se persiste: el enum `energy_tier` de la base
+                      de datos tiene tres valores, no cuatro (02 §3).
+
+función tierEn(t, franjas, compromisos, modificadores, jornada):
+    nivel = franjaEn(t, franjas)?.tier ?? NEUTRAL      // sin franja declarada => NEUTRAL
+    para cada compromiso c con energyCost = HIGH:
+        si c.fin <= t < c.fin + c.drainsAfterMinutes:  // SOLO dentro de la ventana de arrastre
+            nivel = degradar(nivel)                    // PEAK->NEUTRAL, NEUTRAL->LOW
+    si jornada.techoEnergía:  nivel = min(nivel, jornada.techoEnergía)   // deuda de sueño
+    según modificadorEn(t, modificadores):
+        NONE:     nivel = SIN_FOCO
+        REDUCED:  nivel = min(nivel, LOW)
+        NORMAL, ninguno: sin cambio
+    devolver nivel
+
+función segmentarEnergía(hueco, franjas, compromisos, modificadores, jornada):
+    // Fronteras: todo instante donde alguna influencia empieza o acaba. Entre dos fronteras
+    // consecutivas NADA cambia, así que evaluar en el inicio del tramo es exacto.
+    fronteras = { hueco.inicio, hueco.fin }
+              ∪ { inicio y fin de cada franja de energía }
+              ∪ { c.fin  y  c.fin + c.drainsAfterMinutes  de cada c con energyCost = HIGH }
+              ∪ { inicio y fin de cada modificador de capacidad }
+    fronteras = ordenar(fronteras ∩ [hueco.inicio, hueco.fin])
+    segmentos = [ { inicio: a, fin: b, tier: tierEn(a, …) }
+                  para cada par consecutivo (a, b) de fronteras ]
+    devolver fusionarAdyacentesDelMismoTier(segmentos)
 ```
+
+`h.perfilEnergía` es una **partición total del hueco**: los segmentos son contiguos, no se
+solapan, cubren el hueco exacto y ninguno tiene duración cero. Un hueco de tarde libre de un
+cronotipo nocturno produce `NEUTRAL → PEAK → NEUTRAL`, tres segmentos y **un solo hueco**.
 
 El cronotipo no aparece en ningún `if`. Un pico a las 05:00 y uno a las 23:00 recorren
 exactamente el mismo camino. **Eso es la garantía estructural de que el motor no favorece al
 madrugador**, y es verificable con un test: espejar todas las franjas de un caso y comprobar
 que la calidad de la asignación es equivalente.
 
+> **Precisión del 2026-07-29 — `franjaQueContiene` no estaba definida.** `qa-engineer` la
+> encontró al diseñar el caso del cronotipo 22:00–01:00
+> ([`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md)): `nivelEnergía`
+> arrancaba con `base = franjaQueContiene(hueco).tier`, que presupone que el hueco cabe dentro de
+> **una** franja, y `calcularHuecos` nunca corta en las fronteras de `energy_windows`. Un usuario
+> con la tarde libre y pico 22:00–01:00 tiene un hueco que abarca `NEUTRAL→PEAK→NEUTRAL`, y ahí la
+> función no tenía valor. **No cambia ninguna decisión**: la hace total, en la única dirección que
+> el resto del diseño ya exigía.
+>
+> **Se descartó trocear el hueco en las fronteras de franja**, que era la salida más obvia. Habría
+> convertido cada tramo en una unidad de colocación independiente, y entonces la restricción dura
+> nº 1 (`duración(h) >= duraciónRequerida`) se aplicaría por tramo: **un pico de 45 min entre dos
+> tramos neutros dejaría de ser colocable para nada**, cuando la realidad es que un bloque de 90
+> min puede montarse a caballo y aprovechar esos 45 min de pico. Trocear también habría cambiado
+> el número de plazas de colocación y con él el tope emergente de
+> [ADR-015](./adr/ADR-015-parametros-de-calibracion.md). Segmentar el perfil **sin** trocear el
+> hueco da el pico como pico sin tocar ni las plazas ni el mínimo de 60 min.
+>
+> **Se descartó también un `tier` por hueco con regla de resolución** (el mayor, el del inicio, el
+> mayoritario): cualquiera de las tres etiqueta una tarde libre larga con un solo nivel y **el
+> pico deja de ser colocable como pico**, que es la funcionalidad entera del cronotipo.
+>
+> **`NONE` no corta el hueco, y eso lo decide [ADR-011](./adr/ADR-011-privacidad-por-diseno.md)
+> §2**, no una preferencia: ahí la indisponibilidad es un `FixedCommitment` y la *menor capacidad
+> de foco* es un `CapacityModifier`. Son dos cosas distintas a propósito. `focus_capacity = NONE`
+> significa "este tiempo existe y está libre, pero no admite foco" — sigue siendo colocable para
+> admin, seguimientos o bienestar. Tratarlo como tiempo ocupado habría borrado tiempo real de la
+> jornada y habría hecho de `capacity_modifiers` un segundo mecanismo de indisponibilidad, que es
+> justo lo que ADR-011 separó. Por eso `SIN_FOCO` sigue siendo un nivel del retículo y no una
+> ausencia.
+>
+> **El arrastre degrada solo su ventana.** Antes, `si hueco.inicio < c.fin + c.drains` degradaba
+> el hueco **completo**: un hueco de cuatro horas que empezaba un minuto antes de que expirara el
+> arrastre perdía cuatro horas de calidad por un minuto de solape. Ahora la condición es
+> `c.fin <= t < c.fin + c.drains`, evaluada por segmento. Es la misma regla, aplicada donde
+> corresponde.
+
 ### 3.3 Capacidad asignable
 
 ```
-brutoAsignable(j) = suma(duración de huecos con tier != SIN_FOCO)
+brutoAsignable(j) = suma(duración de SEGMENTOS con tier != SIN_FOCO)   // no de huecos enteros
 fricción(j)       = brutoAsignable(j) × params.friccionBasePct
                   + númeroDeTransiciones(j) × params.friccionPorTransiciónMin
 capacidad(j)      = brutoAsignable(j) − mantenimientoPersonal(j) − fricción(j)
 ```
+
+> **Precisión del 2026-07-29.** Antes decía "huecos con `tier != SIN_FOCO`", y con un solo `tier`
+> por hueco eso significaba que **un modificador `NONE` de media hora borraba de la capacidad el
+> hueco entero** que lo contuviera. Sumando por segmentos se descuentan exactamente los minutos
+> declarados, ni uno más. **Los números de ADR-015 no se mueven**: sus perfiles A y B se calcularon
+> sin ningún `capacity_modifier` declarado, así que las 22 plazas y el corte entre 8 y 10 objetivos
+> siguen igual. Lo que cambia es el caso del usuario que sí declara uno, y cambia a su favor.
 
 **Por qué la fricción tiene dos términos.** Un porcentaje fijo trata igual un día de una sola
 reunión y un día de seis, cuando el segundo es mucho más costoso: cada cambio de contexto
@@ -240,8 +312,15 @@ interface Finding {
 | `TRANSITION_LOAD` | `minutosTransición / minutosVigilia` | Coste invisible de los traslados |
 | `SLEEP_DEBT` | jornadas con `déficitSueño > 0` | Restricción dura violada |
 | `NO_PROTECTED_WELLBEING` | bienestar declarado sin hueco viable | Regla nº4 |
-| `FRAGMENTATION_RISK` | huecos < bloque mínimo útil / huecos totales | Fragmentos inútiles |
+| `FRAGMENTATION_RISK` | **huecos** < bloque mínimo útil / **huecos** totales | Fragmentos inútiles |
 | `DEADLINE_AT_RISK` | trabajo restante vs. capacidad hasta la fecha | Anticipa `INFEASIBLE` |
+
+**`FRAGMENTATION_RISK` se cuenta sobre huecos, nunca sobre segmentos de energía** (precisión del
+2026-07-29). Un hueco de cuatro horas cuyo perfil es `NEUTRAL→PEAK→NEUTRAL` **no está fragmentado**:
+nada lo interrumpe, la persona trabaja de un tirón y solo cambia la calidad del tiempo. Contar los
+segmentos aquí reportaría como día fragmentado uno que está entero, y sería un hallazgo falso
+mostrado al usuario. La fragmentación es discontinuidad causada por tiempo **ocupado** —
+compromisos y transiciones—, que es lo que el brief nombra y lo único que corta un hueco.
 
 `CAPACITY_GAP` merece una nota: la "capacidad ingenua" (vigilia menos trabajo) es una
 aproximación deliberadamente ingenua que sirve **solo** para el contraste narrativo —
@@ -355,11 +434,30 @@ semana apretada se quedaría sin sitio, que es la definición de "relleno".
 ### 5.3 Elección de hueco: función de puntuación
 
 ```
-función mejorHueco(bloque, huecosDisponibles, estadoDelDía):
-    candidatos = huecosDisponibles.filtrar(h => cumpleRestriccionesDuras(bloque, h, estadoDelDía))
+función mejorColocación(bloque, huecosDisponibles, estadoDelDía):
+    // Un candidato es un PAR (hueco, instante de inicio), no un hueco.
+    candidatos = []
+    para cada hueco h en huecosDisponibles:
+        para cada inicio en iniciosCandidatos(h, bloque):
+            candidatos.push({ h, inicio, tramo: [inicio, inicio + duración(bloque)) })
+    candidatos = candidatos.filtrar(c => cumpleRestriccionesDuras(bloque, c, estadoDelDía))
     si candidatos vacío: devolver NO_CABE
     devolver max(candidatos, por puntuación) con desempate determinista
+
+función iniciosCandidatos(hueco, bloque):
+    // El perfil de energía es constante a trozos, así que la puntuación es lineal a trozos en
+    // el desplazamiento del bloque: su máximo se alcanza SIEMPRE en un punto donde el inicio o
+    // el fin del bloque coincide con una frontera. Basta un conjunto finito y pequeño.
+    fronteras = { f.inicio, f.fin  de cada segmento f de hueco.perfilEnergía }
+    devolver { x ∈ fronteras ∪ { b − duración(bloque) : b ∈ fronteras }
+               : hueco.inicio <= x  ∧  x + duración(bloque) <= hueco.fin }
 ```
+
+**Por qué el candidato es un par y no un hueco** (precisión del 2026-07-29): con un `tier` por
+hueco, `mejorHueco` nunca decidía *dónde dentro* del hueco cae el bloque, así que un pico de
+22:00–01:00 dentro de una tarde libre era inalcanzable — el bloque caía donde cayera y puntuaba
+con un nivel único. Elegir el instante es lo que hace que el cronotipo se cumpla, y el conjunto
+finito de candidatos lo hace sin búsqueda continua ni pérdida de determinismo.
 
 **Restricciones duras (filtro binario, no puntuación):**
 
@@ -369,7 +467,8 @@ función mejorHueco(bloque, huecosDisponibles, estadoDelDía):
 3. temasDeFocoDistintosEn(día) + (bloque introduce tema nuevo ? 1 : 0)
        <= perfil.maxFocusTopicsPerDay
 4. minutosUsados(día) + duración(bloque) <= capacidad(día)
-5. h.tier != SIN_FOCO  si bloque requiere foco
+5. ningún minuto del tramo del bloque cae en un segmento SIN_FOCO, si el bloque requiere foco
+      (antes: `h.tier != SIN_FOCO`. Un hueco ya no tiene un único tier)
 6. jornada.prohibeFocoNocturno  =>  bloque FOCUS no puede caer en el último tramo
 7. hay hueco para las transiciones respecto a los bloques vecinos
 8. si bloque tiene ventana externa: h está dentro de esa ventana
@@ -378,18 +477,35 @@ función mejorHueco(bloque, huecosDisponibles, estadoDelDía):
 **Puntuación (todo lo demás):**
 
 ```
-puntuación(bloque, h) =
-      W_ENERGÍA     × ajusteEnergía(bloque.necesidad, h.tier)     // término dominante
-    − W_FRAGMENTO   × residuoInútil(h, bloque)      // penaliza dejar restos < 60 min
-    + W_CONTIGÜIDAD × contiguoConMismoObjetivo(h)   // menos cambios de contexto
-    − W_ARRASTRE    × proximidadACompromisoPesado(h)
-    − W_DISPERSIÓN  × objetivosYaTocadosEseDía      // empuja hacia la métrica de éxito
+puntuación(bloque, candidato) =
+      W_ENERGÍA     × ajusteEnergía(bloque.necesidad, candidato.tramo)   // término dominante
+    − W_FRAGMENTO   × residuoInútil(candidato)       // restos < 60 min a AMBOS lados del bloque
+    + W_CONTIGÜIDAD × contiguoConMismoObjetivo(candidato)
+    − W_ARRASTRE    × proximidadACompromisoPesado(candidato)
+    − W_DISPERSIÓN  × objetivosYaTocadosEseDía       // empuja hacia la métrica de éxito
     + W_URGENCIA    × cercaníaDelDeadline(bloque)
 
-ajusteEnergía:  FOCUS profundo    -> PEAK=3, NEUTRAL=1, LOW=-2
-                ADMIN / reactivo  -> LOW=3,  NEUTRAL=1, PEAK=-3   // ¡negativo!
-                bienestar         -> según preferred_tier
+// El bloque puede abarcar varios segmentos de energía: el ajuste es la MEDIA PONDERADA POR
+// MINUTOS del valor de cada segmento que el tramo toca.
+ajusteEnergía(necesidad, tramo) =
+    suma( duración(tramo ∩ seg) × valor(necesidad, seg.tier) ) / duración(tramo)
+
+valor:  FOCUS profundo    -> PEAK=3, NEUTRAL=1, LOW=-2
+        ADMIN / reactivo  -> LOW=3,  NEUTRAL=1, PEAK=-3   // ¡negativo!
+        bienestar         -> según preferred_tier
 ```
+
+**La media ponderada es lo que alinea el bloque con el pico sin trocear nada.** Un bloque de foco
+de 90 min en una tarde libre con pico de 22:00 a 01:00 puntúa más alto cuanto más pico cubre, así
+que el maximizador lo desliza hasta encajarlo dentro del pico por sí solo. Y si el pico solo mide
+45 min, el bloque se monta a caballo y cobra por esos 45: nada se pierde por no llegar al mínimo.
+El comportamiento que el cronotipo promete **emerge de la puntuación**, no de una regla nueva.
+
+> **Pendiente para la fase 4, anotado para que sea una elección y no un descubrimiento:** con el
+> arrastre ya degradando exactamente su ventana en el perfil de energía (§3.2), el término
+> `W_ARRASTRE` queda **parcialmente redundante** — penaliza dos veces lo mismo. Puede que siga
+> teniendo sentido para castigar la *proximidad* a un compromiso pesado más allá de la ventana
+> declarada, que es un efecto distinto. Se decide con el código delante y midiendo, no ahora.
 
 El valor **negativo** de colocar trabajo administrativo en la franja pico es deliberado: no
 basta con preferir el pico para el trabajo profundo, hay que **penalizar activamente** que lo
@@ -400,8 +516,10 @@ es la causa nº1 del brief.
 tocados por día). Es un caso raro y valioso de métrica de producto codificada directamente en
 la función objetivo.
 
-**Desempate determinista, sin aleatoriedad:** hueco más temprano en la jornada → jornada de
-índice menor → `identity_key` lexicográficamente menor. Nunca se usa un generador aleatorio,
+**Desempate determinista, sin aleatoriedad:** **instante de inicio más temprano** → hueco más
+temprano en la jornada → jornada de índice menor → `identity_key` lexicográficamente menor. El
+primer criterio es nuevo (2026-07-29) y es necesario: dos candidatos del mismo hueco con la misma
+puntuación solo se distinguen por su instante de inicio. Nunca se usa un generador aleatorio,
 ni siquiera con semilla. Un motor con aleatoriedad sembrada sigue siendo frágil ante
 reordenamientos de la entrada; el orden total explícito no.
 
