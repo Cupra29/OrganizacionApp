@@ -16,7 +16,9 @@ es un guion de diseño, no un reporte de ejecución.
 > (`wakeSig` se calculaba con la zona del día `d` en vez de la del día `d+1`, así que un viaje
 > rompía el encaje entre jornadas consecutivas). Al aplicar esa corrección aparecieron **tres
 > errores en este mismo documento** (T-4, T-20, T-10), ya arreglados donde aparecen abajo, con
-> nota explicando cada uno porque dos de los tres son instructivos por sí mismos.
+> nota explicando cada uno porque dos de los tres son instructivos por sí mismos. La laguna que
+> T-20 destapó sobre cómo se casan `energy_windows` con huecos (enrutada a `arquitecto`) ya
+> está resuelta también — ver el caso actualizado en §3.8.
 
 ---
 
@@ -638,52 +640,74 @@ una combinación
 #### Caso T-20 — franja `PEAK` contigua a través de medianoche
 
 - **Precondición**: `energy_windows` con `tier = PEAK`, `start_local = 22:00`, `end_local =
-  01:00` (cruza medianoche, **180 min** — de 22:00 a 01:00 son tres horas, no cuatro),
-  `days_mask = 127`. Perfil con `default_wake_local = 07:00`, `default_sleep_local = 02:00`
-  (también cruza medianoche, coherente con un cronotipo nocturno), `America/Mexico_City`.
-  `d = 2026-08-03`.
-- **Acción**: calcular huecos y sus tiers para la jornada de `d` (sin compromisos que
-  interrumpan la vigilia).
-- **Resultado esperado — corregido (2026-07-29), con un punto que necesita aclaración
-  arquitectónica antes de fijarse en código**:
-  - El tramo con `tier = PEAK` cubre exactamente
-    `[2026-08-04T04:00:00Z, 2026-08-04T07:00:00Z)` (22:00 del 3 de agosto a 01:00 del 4, hora
-    local, **180 min**). El resto de la vigilia — `[2026-08-03T13:00:00Z,
-    2026-08-04T04:00:00Z)` (07:00–22:00 local, 900 min) y `[2026-08-04T07:00:00Z,
-    2026-08-04T08:00:00Z)` (01:00–02:00 local, 60 min) — tiene un tier distinto de `PEAK`
-    (asumo `NEUTRAL` por ser el valor por defecto más razonable a falta de otra franja
-    declarada; **`03` no dice explícitamente qué tier corresponde a un tramo de vigilia sin
-    ninguna `energy_window` que lo cubra**, y este documento no lo fija con más precisión de
-    la que el propio documento de arquitectura sostiene).
-  - **La aserción que sí se sostiene sin ambigüedad, y es la que importa para "no partirse en
-    dos"**: el instante `2026-08-04T06:00:00Z` (medianoche local) cae **dentro** del tramo
-    `PEAK` (que va de `04:00Z` a `07:00Z`) y no debe aparecer como frontera entre dos entradas
-    — ni como dos huecos/segmentos `PEAK` consecutivos con una costura exactamente ahí, ni
-    como un cambio de tier en ese punto. El único cambio de tier legítimo dentro de la vigilia
-    ocurre a las 22:00 y a la 01:00 locales (`04:00Z` y `07:00Z`), que son los límites
-    declarados de la franja, no la medianoche.
-  - **Punto que necesita aclaración de `arquitecto`, no supuesto por este documento**: `03
-    §3.2` asigna `h.tier` a cada `hueco` completo (`h.tier = nivelEnergía(h, ...)`, y
-    `nivelEnergía` calcula `base = franjaQueContiene(hueco).tier`, es decir **un único tier
-    por hueco**), pero `calcularHuecos` no especifica ningún paso que trocee un hueco en la
-    frontera de una franja de energía. En este fixture, el hueco libre entre `wake` y `sleep`
-    (sin compromisos) es uno solo y **abarca tres franjas de tier distinto**
-    (`NEUTRAL`/`PEAK`/`NEUTRAL`), así que `franjaQueContiene(hueco)` no está bien definido tal
-    como el pseudocódigo está escrito hoy. No está decidido si la intención es (a) trocear el
-    hueco en tantos segmentos como cambios de tier haya antes de devolverlo, (b) que
-    `nivelEnergía` opere desde el principio sobre unidades más finas que "el hueco completo",
-    o algo distinto. Este documento no lo decide — lo señala para que se rutee a
-    `arquitecto` en vez de suponerlo.
-- **Nivel**: unitario determinista. **Automatizar**: sí, prioridad máxima para la aserción de
-  "no partido en la medianoche" (no depende de cómo se resuelva el punto anterior); la
-  aserción de los 180/900/60 min exactos por segmento debe esperar a que `03` precise el
-  troceo de huecos por franja de energía.
+  01:00` (cruza medianoche, 180 min), `days_mask = 127`. Perfil con `default_wake_local =
+  07:00`, `default_sleep_local = 02:00` (también cruza medianoche, coherente con un cronotipo
+  nocturno), `America/Mexico_City`. `d = 2026-08-03`.
+- **Acción**: calcular el hueco libre de la vigilia de `d` y su `perfilEnergía` (sin
+  compromisos que la interrumpan).
+- **Resultado esperado — con el modelo resuelto por `arquitecto` (2026-07-29): un hueco se
+  segmenta por perfil de energía, no por un `tier` escalar.** La regla, en una frase: *lo que
+  quita disponibilidad corta el hueco; lo que solo cambia la calidad del tiempo segmenta el
+  perfil.* `h.tier` como campo escalar y `franjaQueContiene(hueco)` desaparecen del diseño: un
+  hueco sigue siendo tiempo libre contiguo (solo el tiempo *ocupado* lo corta) y lleva un
+  `perfilEnergía` que lo particiona en segmentos de tier uniforme.
+  - **Un único hueco**, contiguo: `[2026-08-04T04:00:00Z, 2026-08-04T08:00:00Z)` — **240 min**
+    (07:00 a 02:00 local, toda la vigilia, sin nada que la corte).
+  - Con **`perfilEnergía` de dos segmentos**:
+    - `PEAK [2026-08-04T04:00:00Z, 2026-08-04T07:00:00Z)` — **180 min** (22:00–01:00 local).
+    - `NEUTRAL [2026-08-04T07:00:00Z, 2026-08-04T08:00:00Z)` — **60 min** (01:00–02:00 local,
+      resto de la vigilia hasta `sleep`).
+  - **La aserción de medianoche, con las dos negaciones**: el instante
+    `2026-08-04T06:00:00Z` (medianoche local) **no** aparece como frontera de **hueco** (el
+    hueco es uno solo, de `04:00Z` a `08:00Z`, y `06:00Z` cae estrictamente dentro) **ni**
+    como frontera de **segmento** (el segmento que contiene `06:00Z` es el `PEAK`, que va de
+    `04:00Z` a `07:00Z`; las únicas fronteras de segmento son `04:00Z` y `07:00Z`). Con este
+    diseño la doble negación se cumple **por construcción**: 22:00–01:00 es una sola franja
+    declarada en `energy_windows` (02 §3 ya admite `start_local`/`end_local` cruzando
+    medianoche en una sola fila) y la medianoche no es frontera de nada en ningún nivel — ni
+    del hueco, porque nada ocupa tiempo ahí, ni del perfil, porque la franja se declaró como
+    una sola unidad.
+- **Nivel**: unitario determinista. **Automatizar**: sí, prioridad máxima — las tres cifras
+  (240 / 180 / 60) y las dos negaciones de medianoche son verificables tal cual, sin ninguna
+  aclaración pendiente.
 
-> **Nota de corrección (2026-07-29).** La primera versión de este caso esperaba un único
-> hueco `PEAK` de 240 min cubriendo 22:00→02:00 local — aritmética equivocada: la ventana
-> `PEAK` declarada es 22:00–01:00 (180 min), y los 60 min restantes hasta `sleep` (01:00–02:00)
-> no son `PEAK`. La aserción de fondo ("la medianoche local no es una frontera") seguía siendo
-> correcta con cualquiera de las dos lecturas y no cambia con esta corrección.
+> **Historial de correcciones (2026-07-29).** Este caso pasó por tres versiones, y vale la
+> pena dejarlas escritas porque ninguna era del todo errónea:
+> 1. La original esperaba un único hueco `PEAK` de 240 min — conflaba "hueco" y "segmento":
+>    trataba los 240 min enteros de vigilia como si fueran todos `PEAK`, cuando solo 180 lo
+>    son.
+> 2. La corrección intermedia fijó el tramo `PEAK` en 180 min, pero sin dar cabida al resto de
+>    la vigilia (900 min antes de las 22:00 + 60 min después de la 01:00) dentro de la misma
+>    estructura — dejaba pendiente de `arquitecto` cómo convivían huecos y tiers, y se enrutó
+>    como tal.
+> 3. La decisión de `arquitecto` resuelve que ninguna de las dos estaba completa ni estaba del
+>    todo equivocada: **el hueco sí es de 240 min (como decía la versión 1) y el tramo `PEAK`
+>    sí es de 180 min (como decía la versión 2)**. Lo que faltaba era el concepto que hace
+>    ambas cifras compatibles a la vez: el hueco es la unidad de *disponibilidad* (contigua,
+>    cortada solo por tiempo ocupado) y el `perfilEnergía` es la partición interna por
+>    *calidad* del tiempo. Ninguna cifra resta a la otra.
+
+#### Caso T-20.1 — `SIN_FOCO` no vive en el esquema persistido de `energy_windows`
+
+- **Precondición**: esquema de `energy_windows.tier` (02, enum `energy_tier` de 3 valores:
+  `PEAK | NEUTRAL | LOW`, verificado contra el DDL).
+- **Acción**: validar `{ tier: 'SIN_FOCO' }` (o cualquier valor fuera de los tres) contra el
+  esquema Zod que valida `energy_windows` antes de persistir.
+- **Resultado esperado**: rechazo. `SIN_FOCO` es un **nivel calculado**, el cuarto valor que
+  puede tomar un segmento del `perfilEnergía` de un hueco cuando un `capacity_modifier` de
+  tipo `NONE` lo cubre por completo — nunca un valor que el usuario declare ni que se
+  persista en `energy_windows`. El tipo del segmento calculado (4 valores) y el tipo de la
+  franja declarada (3 valores) son dos tipos Zod **distintos** en `packages/contracts`,
+  aunque compartan tres nombres: si compartieran un único esquema, sería posible declarar (o
+  peor, persistir) una franja `SIN_FOCO`, que no tiene sentido como preferencia de usuario —
+  nadie declara "esta franja es sin foco"; es una consecuencia de un modificador o de la
+  colocación, no una intención capturable en la entrevista.
+- **Nivel**: unitario determinista (validación de esquema; en rigor toca a
+  `packages/contracts` más que a `packages/temporal`, pero se deja junto a T-20 porque es la
+  misma confusión de fondo — tier declarado vs. tier calculado — que T-20 acaba de resolver).
+  **Automatizar**: sí, prioridad media — no protege ninguna decisión de ADR por sí solo, pero
+  previene que una fusión de esquemas futura reintroduzca la ambigüedad que T-20 acaba de
+  cerrar.
 
 ---
 
@@ -784,14 +808,13 @@ que un ADR trata como decisión central.
 
 1. **Álgebra de intervalos no tiene ningún criterio de aceptación en el plan** (Hallazgo 5).
    Es una entrega explícita de la fase. Propuesto en §3.3 (T-7.1 a T-7.5).
-2. **Cómo se casan `energy_windows` con `huecos` cuando un hueco libre abarca más de una
-   franja de tier no está especificado con precisión en `03 §3.2`** (descubierto al corregir
-   T-20). El pseudocódigo asigna un único `tier` por hueco (`h.tier = nivelEnergía(h, ...)`)
-   pero no dice si `calcularHuecos` trocea el hueco en la frontera de cada franja antes de
-   asignarle tier, ni qué tier corresponde a un tramo de vigilia sin ninguna franja declarada.
-   Sin esto, el propio ejemplo canónico del cronotipo nocturno (pico 22:00–01:00 dentro de una
-   vigilia más larga) no tiene una salida esperada precisa más allá de "la medianoche no es
-   frontera". Necesita una decisión de `arquitecto`, no una suposición de QA.
+2. **Resuelto (2026-07-29).** Cómo se casan `energy_windows` con `huecos` cuando un hueco
+   libre abarca más de una franja de tier no estaba especificado con precisión en `03 §3.2`
+   (descubierto al corregir T-20). `arquitecto` resolvió que el hueco es la unidad de
+   disponibilidad (contigua, cortada solo por tiempo ocupado) y el `perfilEnergía` es la
+   partición interna por calidad de tiempo — `h.tier` escalar y `franjaQueContiene`
+   desaparecen. Ver el Caso T-20 actualizado en §3.8. Se deja el ítem en la lista, marcado
+   como resuelto, para que el historial de la auditoría quede completo.
 3. **Resolución de `timezone_overrides` + `anchor` (los tres valores) no tiene ningún
    criterio de aceptación**, pese a ser "puerta de una sola dirección" en ADR-003 y entrega
    explícita de esta fase (Hallazgo 6). Propuesto en §3.7 (T-16 a T-19).
@@ -821,6 +844,18 @@ que un ADR trata como decisión central.
     03 §10.3 como necesarios para la suite de aritmética temporal, sin ningún fixture
     concreto en ningún documento. Menor prioridad que 1–10 porque no protege una decisión de
     ADR, solo amplía la variedad de zonas probadas.
+12. **El esquema Zod del segmento de energía calculado (4 valores, incluye `SIN_FOCO`) y el
+    de la franja declarada persistida (3 valores, `PEAK`/`NEUTRAL`/`LOW`) no deben compartir
+    tipo**, según la resolución del ítem 2. Es territorio de `packages/contracts`, no de
+    `packages/temporal`, pero se descubrió aquí y conviene que quien defina esos esquemas lo
+    sepa antes de fusionarlos "para no repetir código". Propuesto en §3.8 (T-20.1). Nota
+    adicional para quien cierre la fase 3/4: los tres cambios que `arquitecto` describió junto
+    a esta resolución —`brutoAsignable` sumando segmentos en vez de huecos completos,
+    `FRAGMENTATION_RISK` contado sobre huecos y nunca sobre segmentos, y el arrastre
+    segmentando en vez de degradar el hueco entero— no tienen fixture propio en ningún
+    documento de QA todavía; no son de esta fase (viven en `packages/engine`, fases 3–4), así
+    que no se proponen aquí, pero quedan anotados para que quien escriba el QA de esa fase no
+    los redescubra desde cero.
 
 ---
 
@@ -835,7 +870,7 @@ que un ADR trata como decisión central.
 | Expansión etapa 2 | T-11, T-12 | Unitario | Máxima (T-11), opcional (T-12) |
 | Excepciones ancladas | T-13, T-14, T-15 | Unitario | Alta |
 | Zona / `anchor` | T-16–T-19 | Unitario + property | Alta |
-| Cronotipo 22–01 | T-20 | Unitario | Máxima (frontera de medianoche); pendiente de aclaración arquitectónica para los minutos exactos por segmento |
+| Cronotipo 22–01 | T-20, T-20.1 | Unitario | Máxima (T-20, ya resuelto sin pendientes); media (T-20.1) |
 | Validador — rechazos | T-21–T-31 | Unitario | Alta |
 | `effective_*` / `UNTIL` | T-32, T-33 | Unitario | Alta |
 | `WKST` / `week_starts_on` | T-34 | Unitario | Alta |
