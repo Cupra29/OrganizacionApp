@@ -39,7 +39,7 @@ improvises ni lo sustituyas por otro. Si crees que falta uno, dilo.
 | `pnpm test:engine` | Solo `@oa/engine`. Rápido, sin base de datos |
 | `pnpm depcruise` | Grafo de dependencias: **¿hay aristas prohibidas?** |
 | `pnpm depcruise:cobertura` | **¿El análisis está mirando lo que debe?** Falla si un paquete desaparece del grafo — un ruleset que no ve nada pasaría en verde sin esto |
-| `pnpm guardrail:cobertura` | **¿El guardrail de reloj sigue viendo los paquetes que dice?** Inyecta un canario y exige que señale las 3 formas prohibidas y ninguna legítima. Un `overrides` que deja de casar sale en verde sin esto |
+| `pnpm guardrail:cobertura` | **¿El guardrail de reloj sigue viendo los paquetes que dice?** Inyecta un canario y exige que señale **todas** las formas prohibidas y **ninguna** legítima. Un `overrides` que deja de casar sale en verde sin esto |
 
 Llegan en su fase y **no antes**: `test:integration` y `db:generate`/`db:migrate` (fase 2),
 `test:golden` (fase 3), `dev` (fase 6).
@@ -87,20 +87,45 @@ dependency-cruiser **18** · temporal-polyfill **1.0.2** · rrule-temporal **2.0
 1. `packages/engine`, `packages/temporal` y `packages/domain` **no tienen dependencias de
    I/O**: ni base de datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un
    parámetro, y **la zona horaria también**: en el núcleo no se lee nunca la del proceso.
-   Son **dos mecanizaciones distintas y las dos están demostradas**:
-   `dependency-cruiser` cubre el I/O **importado**, y el plugin GritQL
-   `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit` cubre `Date.now()`, `new Date()` sin
-   argumentos y `Math.random()`, que son globales y no imports. `new Date(argumento)`,
-   `Math.max` y `Math.floor` **sí** están permitidos. El plugin alcanza además a
-   `packages/ical`, que no es I/O-libre por la misma razón sino porque su salida debe ser
-   reproducible byte a byte (ADR-017). Que cada guardrail siga mirando lo que debe lo
-   verifican `depcruise:cobertura` y `guardrail:cobertura`.
-   **Prohibidas también, pero todavía NO mecanizadas — hoy esa mitad la sostienes tú:**
-   `Temporal.Now` (cualquier miembro), `Intl.DateTimeFormat().resolvedOptions().timeZone` y
-   `performance.now`. La primera llega con `Temporal` (ADR-018) y lee reloj y zona ambiente a
-   la vez. Ampliar el plugin es entrega de la fase 1, dueño `engine-dev`; los casos están
-   diseñados en `docs/qa/fase-1-guardrail-temporal-now.md`. Hasta que `pnpm verify` las vea
-   fallar, son una intención.
+   Son **tres mecanizaciones y ninguna sustituye a las otras** — las tres están demostradas en
+   rojo. Si lees «`dependency-cruiser` lo verifica» y asumes que cubre `Date.now()`, te has
+   equivocado de herramienta:
+   `dependency-cruiser` cubre el I/O **importado**; el plugin GritQL
+   `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit` cubre lo que es **global y no import**; y
+   la regla `polyfill-temporal-solo-en-su-modulo` mecaniza el punto único de importación del
+   polyfill (ADR-018 §1). El plugin alcanza además a `packages/ical`, que no es I/O-libre por
+   la misma razón sino porque su salida debe ser reproducible byte a byte (ADR-017). Que cada
+   guardrail siga mirando lo que debe lo verifican `depcruise:cobertura` y
+   `guardrail:cobertura` — sin ellos, un alcance que deja de casar sale en verde.
+
+   **Prohibido por forma:** `Date.now`, `Math.random`, `new Date()` sin argumentos,
+   `Temporal.Now` (cualquier miembro) y cualquier acceso a `resolvedOptions` — no solo
+   `.timeZone`, porque la lectura estrecha se esquiva extrayendo una variable.
+
+   **Prohibidos por receptor entero**, sin enumerar miembros: `globalThis`, `crypto` y
+   `performance`. Enumerar miembros ya falló una vez aquí: `performance.now` estuvo en la
+   lista **un día** mientras `performance.timeOrigin` —la misma lectura de reloj— pasaba
+   limpio. Atajar el receptor cierra además el alias (`const c = crypto; c.randomUUID()`
+   dispara), que importa porque el límite nº9 prohíbe el azar *incluso con semilla*.
+
+   **Permitido y no dispara:** `new Date(argumento)`, `Math.max`, `Math.floor`,
+   `Temporal.PlainDate.from(...)` y `new Intl.DateTimeFormat(locale, { timeZone })` con la
+   zona explícita. **Los tres receptores enteros son la excepción a esa simetría: no tienen
+   ninguna forma permitida**, y es deliberado — el runtime está fijado por `engines` y el
+   polyfill entra por import, así que no hay detección de capacidades que justificarlos.
+
+   **Quedan fuera a propósito y hoy los sostienes tú:** `process` (excluido de `IO_NATIVO` en
+   `.dependency-cruiser.cjs` por falsos positivos; prohibirlo aquí contradiría esa decisión) y
+   `navigator.language`. Cerrar cualquiera de los dos es una línea el día que se decida.
+
+   **Si necesitas una excepción, es un ADR — no un `biome-ignore`.** Es la única defensa
+   contra el modo por el que mueren estos guardrails, y ya hay precedente: ADR-017 fijó esa
+   doctrina para `ical`.
+
+   **Lo que ningún patrón sintáctico puede ver**, y por tanto lo sostienes tú: acceso
+   computado (`Temporal["Now"]`), alias por identificador (`const T = Temporal`) y receptor
+   entre paréntesis con aserción de tipo. Cerrarlos exigiría análisis de tipos, que los
+   plugins de Biome no hacen.
 2. El validador del motor **no importa nada del módulo de colocación**. La duplicación es
    deliberada: si compartieran utilidades, la validación sería una tautología.
 3. **Ningún campo que registre, insinúe o permita inferir información médica.** Las
