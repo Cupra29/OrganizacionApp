@@ -1,12 +1,15 @@
 # 06 — Preguntas abiertas
 
 Fecha: 2026-07-24 · Última verificación: 2026-07-29
-Estado: **Q1–Q12 resueltas** (Q1, Q2, Q4, Q5, Q8 y Q12 el 2026-07-27; Q3, Q6, Q7, Q9, Q10 y Q11
-el 2026-07-28). 🔶 **Q13 y Q14 abiertas desde el 2026-07-29**, las dos de producto y **ninguna
-bloqueante**: la fase 1 avanza con los supuestos anotados en cada una. Nacieron al enumerar el
-subconjunto de `RRULE` en [ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md), que es
-el quinto hallazgo que este mecanismo destapa antes de escribir código — esta vez, un criterio de
-aceptación que era imposible de cumplir.
+Estado: ✅ **TODAS RESUELTAS (14).** Q1, Q2, Q4, Q5, Q8 y Q12 el 2026-07-27; Q3, Q6, Q7, Q9, Q10 y
+Q11 el 2026-07-28; **Q13 y Q14 el 2026-07-29**, el mismo día en que se abrieron. **No queda
+ninguna pregunta abierta: la fase 1 sigue.**
+
+Q13 y Q14 nacieron al enumerar el subconjunto de `RRULE` en
+[ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md). Es el quinto hallazgo que este
+mecanismo destapa antes de escribir código, y esta vez fueron dos: un **criterio de aceptación
+imposible de cumplir** y una **demo que enseñaba lo contrario de lo que el proyecto presume de
+resolver**.
 
 > Este documento pasa de ser una lista de bloqueos a ser el **registro de por qué el diseño es
 > como es**. Conviene conservarlo: cuando dentro de seis meses alguien se pregunte por qué la
@@ -417,9 +420,36 @@ comprometida con alguien.
 
 ---
 
-## Q13 — ¿El turno rotativo real está alineado con la semana civil o no? 🔶 Abierta (2026-07-29)
+## Q13 — ¿El turno rotativo real está alineado con la semana civil o no? ✅ Resuelta
 
-**Por qué importa.** Al contrastar los candidatos de expansión contra el criterio de aceptación
+> **Respuesta (2026-07-29): DESALINEADO de la semana civil.** **No confirmó el supuesto**, que
+> trataba las dos fixtures como equivalentes y dejaba la de 7 días como caso principal.
+>
+> **Consecuencias, en orden de importancia:**
+>
+> 1. **La fixture representativa pasa a ser la de ciclo desalineado**; la de 4×3 (7 días) se queda
+>    como el caso que nombra el brief, no como el caso de referencia.
+> 2. **La demo de la fase 3 cambia de patrón.** Decía "fixture de enfermera con turnos 4×3", que
+>    es el patrón alineado: habría enseñado ocho semanas idénticas, es decir algo que un
+>    calendario semanal ordinario también sabe enseñar. Siendo la **primera recompensa visible**
+>    del proyecto, enseñar precisamente lo que no nos distingue era el peor error posible ahí.
+>    Corregido en [05](./05-plan-de-implementacion.md).
+> 3. **La justificación de `CYCLE` en [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md) deja
+>    de apoyarse en un caso hipotético.** El ADR descarta "solo RRULE" porque los turnos con
+>    *"ciclo desfasado de la semana civil"* exigirían reglas artificiales con offsets calculados;
+>    hasta hoy el único ejemplo desalineado del documento era el 2-2-3, que nadie había
+>    confirmado. Ahora hay un caso real. **Ninguna decisión cambia**, así que se anota como nota
+>    fechada dentro del ADR y no con un ADR de reemplazo — mismo mecanismo que la confirmación de
+>    disponibilidad en ADR-001.
+>
+> **Lo que la respuesta NO fija: la longitud exacta del ciclo.** La opción elegida agrupaba varios
+> patrones ("2-2-3, 8 días…"), así que está confirmado el *hecho* (desalineado) y no el *número*.
+> Los criterios de aceptación de las fases 1 y 3 usan 8 días porque es el ciclo con el que la
+> aserción es más fuerte —periodo de exactamente 8 semanas, así que las ocho salen distintas y la
+> novena repite la primera— no porque sea el turno de nadie. **Si la fixture tiene que retratar un
+> turno real, falta ese dato**; está anotado como tal en el reporte y en la fase 3.
+
+**Por qué importaba.** Al contrastar los candidatos de expansión contra el criterio de aceptación
 de la fase 1 apareció que ese criterio era **insatisfacible**: pedía que un 4×3 produjera semanas
 civiles distintas entre sí, y 4 + 3 = 7, así que el ciclo está alineado con la semana y las ocho
 semanas salen **idénticas** con cualquier ancla. Corregido en el
@@ -444,9 +474,19 @@ un 4×3 alineado no demuestra lo que el proyecto presume de resolver.
 
 ---
 
-## Q14 — ¿Algún compromiso real necesita "el tercer martes de cada mes"? 🔶 Abierta (2026-07-29)
+## Q14 — ¿Algún compromiso real necesita "el tercer martes de cada mes"? ✅ Resuelta
 
-**Por qué importa.** [ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md) §3 enumera el
+> **Respuesta (2026-07-29): no, ninguno.** Confirma el supuesto de
+> [ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md) §3 sin cambios: el validador
+> sigue rechazando `BYDAY` con prefijo numérico (`3TU`, `-1FR`) y `BYSETPOS` con un error que
+> nombra la propiedad. **La fase 1 no crece**, y el expansor de la etapa 1 se queda sin ningún
+> camino de selección posicional, que era la mitad de su coste.
+>
+> Queda como puerta abierta y barata: el día que aparezca un compromiso así, es un ADR que
+> reemplaza a ADR-018 y ~50 % más de trabajo en la parte `RRULE` de la fase 1. No toca el modelo
+> de datos ni ninguna puerta de una sola dirección.
+
+**Por qué importaba.** [ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md) §3 enumera el
 subconjunto de `RRULE` y **rechaza `BYDAY` con prefijo numérico** (`3TU`, `-1FR`) y `BYSETPOS`.
 Esa exclusión es la mitad del coste de implementar la expansión: es el único caso que exige
 selección posicional dentro de un periodo. Ningún caso del brief lo pide, pero es un patrón real
@@ -487,16 +527,16 @@ validado. Barato de decidir ahora, caro de descubrir en la fase 6 con la entrevi
 | Q11 | 14 días completos | Sí, con mejor argumento (regla nº6) |
 | **Q6** | Fricción 15 % + 7 min | **No** — y destapó un error en Q5 |
 
-**Abiertas (2), desde el 2026-07-29:**
+**Resueltas el 2026-07-29 (2):**
 
-| | Pregunta | ¿Bloquea? |
+| | Respuesta | ¿Confirmó el supuesto? |
 |---|---|---|
-| Q13 | ¿El turno rotativo real está alineado con la semana civil? | No — se implementan las dos fixtures |
-| Q14 | ¿Hace falta "el tercer martes de cada mes"? | No — se rechaza con error explícito |
+| **Q13** | Turno rotativo **desalineado** de la semana civil | **No** — cambia la fixture representativa y el patrón de la demo de la fase 3 |
+| Q14 | Sin `BYDAY` posicional | Sí — ADR-018 §3 se mantiene, la fase 1 no crece |
 
-## Las 12 primeras, y qué dejaron
+## Las 14, y qué dejaron
 
-De las 12, **cuatro no confirmaron el supuesto** y cada una dejó rastro en el diseño:
+De las 14, **cinco no confirmaron el supuesto** y cada una dejó rastro en el diseño:
 
 | | Qué cambió |
 |---|---|
@@ -504,6 +544,7 @@ De las 12, **cuatro no confirmaron el supuesto** y cada una dejó rastro en el d
 | Q8 | Tres tablas dejaron de persistir narrativas redactadas → [ADR-014] |
 | Q6 | Fricción conservadora → [ADR-015] |
 | Q6 (efecto colateral) | **Corrigió una afirmación falsa de Q5** sobre el tope emergente |
+| Q13 | La fixture representativa del turno rotativo pasa a ser un ciclo desalineado, y con ella el patrón de la demo de la fase 3 |
 
 Ese último es el argumento a favor de haber escrito este documento: la pregunta que parecía
 menor —unos parámetros numéricos— fue la que obligó a correr los números y destapó que un
@@ -519,6 +560,11 @@ registro de por qué el diseño es como es.
 > candidatos de implementación contra un criterio concreto, no una revisión general. Es el
 > argumento para seguir escribiendo criterios de aceptación con fechas y números en lugar de
 > descripciones.
+>
+> Y la respuesta a Q13, el mismo día, mostró que **el error se había propagado**: la demo de la
+> fase 3 —la primera cosa que el proyecto enseña— usaba el mismo patrón alineado, así que habría
+> presentado ocho semanas idénticas como prueba de que el modelo no es una semana plantilla. Un
+> ejemplo mal elegido no se queda quieto en el documento donde nació.
 
 [ADR-014]: ./adr/ADR-014-cumplimiento-rgpd.md
 [ADR-015]: ./adr/ADR-015-parametros-de-calibracion.md

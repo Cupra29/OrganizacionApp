@@ -217,10 +217,16 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
 - Sigue en pie: **no** `moment`, **no** `date-fns` con zonas.
 
 **Criterio de aceptación**
-- Un turno rotativo **4×3** (ciclo de 7 días) anclado el 2026-08-03 expande correctamente 8
-  semanas.
-- Un turno rotativo de **ciclo de 8 días** (4 de trabajo / 4 de descanso) anclado el 2026-08-03
-  expande 8 semanas civiles **distintas entre sí**, y la **semana 9 vuelve a ser igual que la 1**.
+- **Fixture representativa (Q13):** un turno rotativo de **ciclo desalineado de la semana civil**
+  anclado el 2026-08-03 expande 8 semanas civiles **distintas entre sí**, y la **semana 9 vuelve a
+  ser igual que la 1**. Se usa un ciclo de **8 días** (4 de trabajo / 4 de descanso) porque es el
+  que hace la aserción más fuerte: el patrón avanza un día de la semana por ciclo, así que el
+  periodo es exactamente 8 semanas y salen las ocho distintas **más** un falsificador. **Los 8
+  días son una elección de prueba, no un dato del usuario**: Q13 confirmó que el turno real está
+  desalineado y **no** su longitud exacta.
+- Un turno rotativo **4×3** (ciclo de 7 días, alineado) anclado el 2026-08-03 expande
+  correctamente 8 semanas. Se conserva porque es el caso que nombra el brief, pero **no demuestra
+  nada sobre la semana plantilla**: sus ocho semanas son idénticas por construcción.
 
   > **Corregido el 2026-07-29** al contrastar los candidatos de expansión contra este criterio
   > ([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md)). El criterio pedía semanas
@@ -232,8 +238,9 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   > necesita un ciclo no múltiplo de 7. Con 8 días, el patrón avanza un día de la semana por
   > ciclo y el periodo es exactamente 8 semanas: se obtienen las ocho distintas **y** un
   > falsificador (la 9ª repite la 1ª) que un expansor que devuelva ruido no puede satisfacer.
-  > Se conservan las dos fixtures: la de 7 días es el caso que nombra el brief, la de 8 es la que
-  > carga la aserción. Ambas empiezan en 2026-08-03, que es lunes.
+  > Se conservan las dos fixtures, y **Q13 (resuelta el 2026-07-29) decidió cuál manda**: el turno
+  > real está desalineado, así que la desalineada es la representativa y la de 7 días queda como el
+  > caso del brief. Ambas empiezan en 2026-08-03, que es lunes.
 - Una jornada que cruza un cambio de horario mide 23 h o 25 h reales, no 24.
 - Un turno de 720 min que empieza a las 19:00 el día del cambio de horario **termina a otra hora
   local** ese día: la duración son minutos reales sobre la línea de instantes, no hora de pared
@@ -297,9 +304,20 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   depurar el motor sin interfaz.
 
 **Criterio de aceptación**
-- **Ya hay valor demostrable sin plan.** Con un fixture de enfermera con turnos 4×3, el
-  diagnóstico dice cuántas horas asignables tiene realmente por semana y qué porcentaje de su
-  franja pico está ocupada. Se puede enseñar a un usuario y que le resulte útil.
+- **Ya hay valor demostrable sin plan.** Con un fixture de enfermera con **turno rotativo
+  desalineado de la semana civil**, el diagnóstico dice cuántas horas asignables tiene realmente
+  **cada semana** —que no son las mismas dos semanas seguidas— y qué porcentaje de su franja pico
+  está ocupada. Se puede enseñar a un usuario y que le resulte útil.
+
+  > **Corregido el 2026-07-29 (Q13).** Este criterio decía "turnos 4×3", que es un ciclo de 7 días
+  > y por tanto **alineado** con la semana civil: la demo habría enseñado ocho semanas idénticas.
+  > Siendo la primera cosa que el proyecto muestra, habría presentado como logro justo lo que un
+  > calendario semanal ordinario también sabe hacer, y habría ocultado la propiedad que sostiene
+  > todo el diseño temporal —que la unidad es la jornada y no existe semana plantilla
+  > ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3)—. Q13 confirmó que el
+  > turno real está desalineado, así que la demo usa la fixture representativa de la fase 1. **La
+  > longitud del ciclo sigue sin fijarse**; si esta demo tiene que retratar un turno concreto y no
+  > solo demostrar la propiedad, ese dato falta.
 - El fixture 09 (madrugador) produce la misma estructura de capacidad que el 08 (nocturno)
   con las franjas espejadas. **Test antisesgo**: si difieren, hay un `if` que favorece a un
   cronotipo.

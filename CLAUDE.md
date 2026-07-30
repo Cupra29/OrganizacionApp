@@ -70,7 +70,12 @@ dependency-cruiser **18** · temporal-polyfill **1.0.2**
 - Diseño: `docs/arquitectura/00..07-*.md`
 - Decisiones: `docs/arquitectura/adr/` — formato estándar, numeración correlativa.
 - **Toda decisión que contradiga un ADR vigente exige un ADR nuevo que lo reemplace.**
-  No se edita un ADR aceptado: se supera con otro.
+  Un ADR aceptado **no cambia de decisión**: se supera con otro.
+- **Sí admite notas fechadas**, y son la práctica de la casa (ADR-003, ADR-005, ADR-018): que una
+  pregunta abierta confirmó lo ya decidido, que la justificación pasó de hipotética a empírica, o
+  que un ejemplo del propio ADR resultó engañoso. Son aditivas y dicen explícitamente que ninguna
+  decisión cambia. **Si la nota tendría que alterar la decisión, no es una nota: es el ADR que
+  falta.**
 - Preguntas abiertas pendientes de respuesta: `docs/arquitectura/06-preguntas-abiertas.md`.
 
 ## Límites que no se cruzan sin un ADR nuevo

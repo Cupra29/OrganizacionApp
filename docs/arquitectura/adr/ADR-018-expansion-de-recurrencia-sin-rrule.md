@@ -290,6 +290,13 @@ después es rehacerla. Se descarta por el mismo argumento que puso el guardrail 
   ADR que reemplace a este, no un `biome-ignore`.
 
 **Lo que queda condicionado**
+- **Nota fechada (2026-07-29): Q14 confirma el §3.** Ningún compromiso real necesita "el tercer
+  martes de cada mes", así que la exclusión de `BYDAY` posicional y `BYSETPOS` se mantiene tal cual
+  y el expansor de la etapa 1 se queda **sin ningún camino de selección posicional**, que era la
+  mitad de su coste. Q13 confirmó además que el turno rotativo real está **desalineado** de la
+  semana civil —lo que respalda la fixture corregida del criterio de aceptación— pero **no fijó su
+  longitud**: los 8 días son una elección de prueba. Ninguna decisión de este ADR cambia; de ahí
+  que sea una nota y no un ADR de reemplazo.
 - La fase 1 del [05](../05-plan-de-implementacion.md) cambia su línea de dependencia externa, su
   entrega (aparece la separación en dos etapas) y su criterio de aceptación del turno rotativo,
   que era **insatisfacible**: un 4×3 es un ciclo de 7 días y por tanto produce semanas civiles
