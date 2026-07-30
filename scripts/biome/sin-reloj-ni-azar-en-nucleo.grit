@@ -62,42 +62,65 @@
 //                         porque `resolvedOptions` no es una palabra que se elija por
 //                         casualidad —a diferencia de `Now`, que sí, y por eso ese patrón sí
 //                         va anclado a `Temporal`— y porque el nombre está tomado por `Intl`.
-//   `performance.now`     reloj monótono. Forma sintáctica propia: que `Date.now` esté
-//                         cubierto no la cubre.
 //
-// `globalThis`, PROHIBIDO ENTERO Y CON DIAGNÓSTICO PROPIO (aprobado el 2026-07-30; queda
-// fuera de lo que enumera ADR-018 §9 y en un eje distinto, el objeto global y no el reloj,
-// por eso se decidió aparte y no de pasada). Es la puerta de atrás a TODOS los demás patrones:
-// ninguno de ellos casa con `globalThis.Date.now()`, `globalThis.Math.random()`,
-// `globalThis.Temporal.Now`, `globalThis.Intl.DateTimeFormat().resolvedOptions().timeZone` ni
-// `globalThis.performance.now()`, porque en todos el receptor deja de ser el identificador
-// literal. Cerrar cinco agujeros con cinco patrones más habría dejado abiertos los que no se
-// enumeraran —`globalThis.crypto.getRandomValues()` es azar y `globalThis.process.env.TZ` es
-// la zona del proceso, que es el modo de fallo por el que ADR-018 descartó `rrule`—, así que
-// se ataja el receptor y no la lista. Se prohíbe el identificador, no `globalThis.$miembro`,
-// para que la referencia suelta (`algo(globalThis)`) caiga también: mismo argumento que ya
-// obligó a tener `Date.now` y `new Date` sin paréntesis.
+// `performance.now` estuvo en esta lista el 2026-07-29 y duró un día: pasó al segundo bloque
+// como receptor entero en cuanto se vio que `performance.timeOrigin` se colaba. Queda anotado
+// porque la lección es esa y no el detalle.
 //
-// NO ADMITE NINGUNA FORMA LEGÍTIMA, y esto es deliberado, no un descuido: en estos cuatro
-// paquetes no hay ni un uso válido de `globalThis`. La detección de capacidades no aplica
-// (el runtime está fijado por `engines` y el polyfill entra por import, no por sondeo), y
-// `globalThis.Temporal ?? polyfill` —el patrón que usa `rrule-temporal`— es exactamente lo
-// que ADR-018 descartó en "Alternativas consideradas": un paquete puro cuyo comportamiento
-// depende del orden de importación. Que la lista de controles negativos de `globalThis` en
-// verificar-guardrail-nucleo.mjs no tenga ninguna forma permitida NO es un olvido.
-// Lo único que el patrón toca de más, comprobado el 2026-07-30: un identificador o una clave
-// de propiedad escritos literalmente `globalThis` (`{ globalThis: 1 }`, `function f(globalThis)`).
-// No dispara con una cadena `"globalThis"` ni con un identificador que solo lo contenga
-// (`esGlobalThis`), que son los vecinos plausibles y están en el canario.
+// EL SEGUNDO BLOQUE: TRES RECEPTORES PROHIBIDOS ENTEROS, con diagnóstico propio.
+// `globalThis` (aprobado el 2026-07-30), `crypto` y `performance` (aprobados el mismo día, al
+// confirmarse que `crypto.getRandomValues()` sin prefijo no lo veía nadie). Los tres quedan
+// fuera de lo que enumera ADR-018 §9 y por eso se decidieron aparte, no de pasada.
+//
+// Se prohíbe el IDENTIFICADOR y no `$receptor.$miembro`, por dos razones distintas:
+//   a) enumerar miembros deja huecos, y está demostrado que los dejó. `performance.now`
+//      estuvo un día en la lista y `performance.timeOrigin` —que es la misma lectura de
+//      reloj— pasaba limpio. Lo mismo con `crypto.getRandomValues` frente a
+//      `crypto.randomUUID` y `crypto.subtle`.
+//   b) así cae también la referencia suelta (`algo(globalThis)`, `const c = crypto;`), que es
+//      el argumento que ya obligó a tener `Date.now` y `new Date` sin paréntesis. Para `crypto`
+//      esto importa más que para los demás: el límite nº9 prohíbe el azar INCLUSO CON SEMILLA,
+//      así que no hay forma atenuada que valga.
+// `globalThis` además es la puerta de atrás a todos los patrones del primer bloque: ninguno de
+// ellos casa con `globalThis.Date.now()`, `globalThis.Temporal.Now` ni
+// `globalThis.Intl.DateTimeFormat().resolvedOptions()`, porque en todos el receptor deja de
+// ser el identificador literal.
+//
+// NINGUNO ADMITE UNA FORMA LEGÍTIMA, y esto es deliberado, no un descuido. En estos cuatro
+// paquetes no hay un uso válido de los tres: la detección de capacidades no aplica (el runtime
+// está fijado por `engines` y el polyfill entra por import, no por sondeo);
+// `globalThis.Temporal ?? polyfill` —el patrón de `rrule-temporal`— es justo lo que ADR-018
+// descartó en "Alternativas consideradas"; el azar no tiene cabida por el límite nº9; y medir
+// tiempo con `performance` dentro de un paquete cuya salida debe ser función de su entrada no
+// mide nada que sirva. Que la lista de controles negativos de estos tres en
+// verificar-guardrail-nucleo.mjs no contenga ninguna forma permitida NO es un olvido.
+//
+// Lo que tocan de más, comprobado el 2026-07-30: un identificador o una clave de propiedad
+// escritos con ese nombre (`{ globalThis: 1 }`, `opciones.crypto`, `function f(performance)`).
+// Se acepta con el mismo criterio que `resolvedOptions` y por el contrario que `Now`: son
+// nombres que el runtime ya tiene tomados, no palabras que uno elija por casualidad en código
+// de jornadas y bloques. Si algún día molesta, es un renombrado, no un `biome-ignore`. NO
+// disparan la cadena `"crypto"` ni un identificador que solo los contenga (`esGlobalThis`),
+// que son los vecinos plausibles y están en el canario.
 //
 // LO QUE NINGUNO DE ESTOS PATRONES PUEDE VER. Queda escrito para que no se descubra como
-// sorpresa; las tres formas se comprobaron una por una el 2026-07-29 y NO disparan:
+// sorpresa; las cinco formas se comprobaron una por una y NO disparan:
 //   1. acceso computado          `Temporal["Now"].instant()`, `fmt["resolvedOptions"]()`
 //   2. alias por identificador   `const T = Temporal; T.Now.instant()`
 //   3. receptor entre paréntesis `(performance as { now: () => number }).now()`
-// Son inherentes a un patrón sintáctico: cerrarlas exige análisis de tipos, que los plugins de
-// Biome no hacen hoy. Ya las tenía `Date.now` desde la fase 0, no son regresión de nada. El
-// criterio no cambia — el guardrail hace imposible la forma cómoda, no el sabotaje deliberado.
+//   4. el global `process`       `process.env.TZ` (zona ambiente), `process.hrtime.bigint()`,
+//                                `process.uptime()`
+//   5. el global `navigator`     `navigator.language` (locale ambiente)
+// Las tres primeras son inherentes a un patrón sintáctico: cerrarlas exige análisis de tipos,
+// que los plugins de Biome no hacen hoy, y ya las tenía `Date.now` desde la fase 0.
+// 4 y 5 son el resto del mismo eje que cierran `crypto` y `performance`, y NO se cerraron por
+// cuenta propia: `process` está excluido a propósito y por escrito de `IO_NATIVO` en
+// .dependency-cruiser.cjs, así que prohibir aquí el global contradiría una decisión escrita en
+// la herramienta hermana y merece decidirse aparte; y es el único de los cinco con un uso
+// legítimo imaginable (`process.env.CI` en un test). `navigator` es locale ambiente, la familia
+// de `resolvedOptions`, pero un receptor que ADR-018 §9 tampoco nombra. Cerrar cualquiera de
+// los dos es una línea en el segundo bloque el día que se apruebe.
+// El criterio no cambia — el guardrail hace imposible la forma cómoda, no el sabotaje deliberado.
 //
 // ALCANCE: `packages/{engine,temporal,domain,ical}`, declarado en el `overrides` de biome.json.
 // Los tres del núcleo entran por el límite nº1 (ausencia de I/O, determinismo del motor).
@@ -121,12 +144,15 @@ or {
     `new Date()`,
     `new Date`,
     `Temporal.Now`,
-    `$formateador.resolvedOptions`,
-    `performance.now`
+    `$formateador.resolvedOptions`
   } as $uso where {
     register_diagnostic(span=$uso, message="Reloj, zona ambiente o azar en el núcleo: aquí `now` y la zona horaria entran siempre como parámetros. Sí están permitidos y no disparan: `new Date(argumento)`, `Math.max`, `Math.floor`, `Temporal.PlainDate.from(...)` y `new Intl.DateTimeFormat(locale, { timeZone })` con la zona explícita.", severity="error")
   },
-  `globalThis` as $global where {
-    register_diagnostic(span=$global, message="`globalThis` está prohibido entero en el núcleo, no solo el miembro que estés leyendo: es la puerta de atrás a todas las formas que este plugin persigue (`globalThis.Date.now()`, `globalThis.Math.random()`, `globalThis.Temporal.Now`, `globalThis.Intl`, `globalThis.crypto`, `globalThis.process.env.TZ`) y en estos cuatro paquetes no tiene ningún uso legítimo. Si de verdad necesitas uno, es un ADR, no un `biome-ignore`.", severity="error")
+  or {
+    `globalThis`,
+    `crypto`,
+    `performance`
+  } as $receptor where {
+    register_diagnostic(span=$receptor, message="Global de reloj o azar prohibido ENTERO en el núcleo, no solo el miembro que estés leyendo. Enumerar miembros deja huecos y ya los dejó: `crypto.randomUUID()` además de `crypto.getRandomValues()`, `performance.timeOrigin` además de `performance.now()`, y `globalThis.` delante de cualquiera de ellos. Ninguno de los tres tiene uso legítimo en estos cuatro paquetes: el azar está prohibido incluso con semilla y el reloj entra como parámetro. Si de verdad necesitas uno, es un ADR, no un `biome-ignore`.", severity="error")
   }
 }
