@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { D, elemento, I, T, ZONA } from "./fixtures.ts";
 import { construirJornadas, type ExcepcionDia, type PerfilTemporal } from "./jornadas.ts";
+import { Temporal } from "./temporal.ts";
 
 function perfil(zona: string, wake: string, sleep: string, necesidad = 480): PerfilTemporal {
   return {
@@ -19,13 +20,14 @@ function perfil(zona: string, wake: string, sleep: string, necesidad = 480): Per
 }
 
 function jornadaDe(p: PerfilTemporal, fecha: string, excepcionesDia: readonly ExcepcionDia[] = []) {
-  const jornadas = construirJornadas({
+  const { jornadas, degeneradas } = construirJornadas({
     ventana: { desde: D(fecha), hasta: D(fecha).add({ days: 1 }) },
     perfil: p,
     excepcionesDia,
     overridesZona: [],
   });
   expect(jornadas).toHaveLength(1);
+  expect(degeneradas).toHaveLength(0);
   return elemento(jornadas, 0);
 }
 
@@ -120,12 +122,13 @@ describe("`day_exceptions` — el día atípico manda sobre el perfil, campo a c
   it("la excepción del día SIGUIENTE mueve el `wakeSig`, y por tanto el sueño de hoy", () => {
     // Es el caso que fuerza a leer `excepcionDe(d+1)` y no solo `excepcionDe(d)`. Sin esa
     // lectura, `wakeSig` y el `wake` de la jornada siguiente dejan de encajar.
-    const [hoy, mañana] = construirJornadas({
+    const { jornadas } = construirJornadas({
       ventana: { desde: D("2026-08-03"), hasta: D("2026-08-05") },
       perfil: base,
       excepcionesDia: [{ localDate: D("2026-08-04"), wakeLocal: T("10:00") }],
       overridesZona: [],
     });
+    const [hoy, mañana] = jornadas;
     expect(hoy?.wakeSig.toString()).toBe(I("2026-08-04T16:00:00Z").toString());
     expect(mañana?.wake.toString()).toBe(hoy?.wakeSig.toString());
     expect(hoy?.sueñoMinutes).toBe(660);
@@ -134,7 +137,7 @@ describe("`day_exceptions` — el día atípico manda sobre el perfil, campo a c
 
 describe("la ventana es semiabierta `[desde, hasta)`", () => {
   it("con `desde == hasta` no produce ninguna jornada", () => {
-    const jornadas = construirJornadas({
+    const { jornadas } = construirJornadas({
       ventana: { desde: D("2026-08-03"), hasta: D("2026-08-03") },
       perfil: perfil(ZONA.MEDIANOCHE_SIN_DST, "07:00", "23:00"),
       excepcionesDia: [],
@@ -144,7 +147,7 @@ describe("la ventana es semiabierta `[desde, hasta)`", () => {
   });
 
   it("numera las jornadas por su posición en la ventana", () => {
-    const jornadas = construirJornadas({
+    const { jornadas } = construirJornadas({
       ventana: { desde: D("2026-08-03"), hasta: D("2026-08-06") },
       perfil: perfil(ZONA.MEDIANOCHE_SIN_DST, "07:00", "23:00"),
       excepcionesDia: [],
@@ -158,10 +161,120 @@ describe("la ventana es semiabierta `[desde, hasta)`", () => {
     ]);
   });
 
+  it("una jornada normal no recorta nada de vigilia", () => {
+    const j = jornadaDe(perfil(ZONA.MEDIANOCHE_SIN_DST, "07:00", "23:00"), "2026-08-03");
+    expect(j.recorteVigiliaMinutes).toBe(0);
+  });
+
   it("`elemento` falla con nombre si una fixture no tiene la jornada que se le pide", () => {
     // La rama de error de la ayuda de fixtures, ejercitada a propósito: sin esto queda como la
     // única rama sin cubrir del paquete, y una ayuda que nunca se ha visto fallar convierte una
     // fixture rota en un `TypeError` sin contexto a tres líneas de distancia.
     expect(() => elemento([], 0)).toThrow(/no tiene elemento 0/);
+  });
+});
+
+describe("El acotado transmeridiano — `sleep = min(sleep, wakeSig)`", () => {
+  // Volar al este acorta el día de verdad, y la hora de acostarse declarada puede caer DESPUÉS
+  // del despertar siguiente. Sin acotar, `[wake, sleep)` se sale de la jornada e invade la
+  // siguiente: las dos reclaman los mismos minutos y la capacidad se cuenta dos veces.
+  const viajeDesdeMexico = (destino: string, desde: string) =>
+    construirJornadas({
+      ventana: { desde: D(desde), hasta: D(desde).add({ days: 2 }) },
+      perfil: perfil(ZONA.MEDIANOCHE_SIN_DST, "07:00", "23:00"),
+      excepcionesDia: [],
+      overridesZona: [
+        {
+          during: {
+            desde: I(`${D(desde).add({ days: 1 }).toString()}T00:00:00Z`),
+            hasta: I("2027-01-01T00:00:00Z"),
+          },
+          timezone: destino,
+        },
+      ],
+    });
+
+  it("México → Madrid: 8 h de salto contra 8 h de sueño es el límite EXACTO", () => {
+    const { jornadas } = viajeDesdeMexico(ZONA.DST_UE, "2026-08-03");
+    const vispera = elemento(jornadas, 0);
+    expect(vispera.sueñoMinutes).toBe(0);
+    // Justo en el límite no hay nada que recortar: `sleep` cae exactamente en `wakeSig`.
+    expect(vispera.recorteVigiliaMinutes).toBe(0);
+    expect(vispera.sleep.equals(vispera.wakeSig)).toBe(true);
+    expect(vispera.vigiliaMinutes).toBe(960);
+    // Sueño cero es el caso extremo de `SLEEP_DEBT`, y no hace falta maquinaria nueva.
+    expect(vispera.déficitSueñoMinutes).toBe(480);
+    expect(vispera.prohibeFocoNocturno).toBe(true);
+    expect(vispera.techoEnergía).toBe("NEUTRAL");
+  });
+
+  it("México → Lord Howe en AGOSTO: salto de 16,5 h, recorte de 510 min", () => {
+    // Agosto es INVIERNO en el hemisferio sur: Lord Howe está en hora estándar (+10:30), no en
+    // la de verano (+11). El salto son 16,5 h y no 17, así que el recorte son 510 min y no 540.
+    const { jornadas } = viajeDesdeMexico(ZONA.DST_MEDIA_HORA, "2026-08-03");
+    const vispera = elemento(jornadas, 0);
+    expect(vispera.sueñoMinutes).toBe(0);
+    expect(vispera.recorteVigiliaMinutes).toBe(510);
+    expect(vispera.vigiliaMinutes).toBe(450); // la jornada entera dura 7 h 30 min
+    expect(vispera.vigiliaMinutes + vispera.sueñoMinutes).toBe(450);
+  });
+
+  it("México → Lord Howe en ENERO: salto de 17 h, recorte de 540 min", () => {
+    // Con Lord Howe en horario de verano (+11) el salto sí son 17 h: la jornada dura 7 h, la
+    // vigilia declarada 16, y el recorte los 9 h = 540 min que nombra 03 §3.1.
+    const { jornadas } = viajeDesdeMexico(ZONA.DST_MEDIA_HORA, "2026-01-05");
+    const vispera = elemento(jornadas, 0);
+    expect(vispera.sueñoMinutes).toBe(0);
+    expect(vispera.recorteVigiliaMinutes).toBe(540);
+    expect(vispera.vigiliaMinutes).toBe(420); // 7 h exactas
+  });
+
+  it("el acotado impide el doble conteo: `[wake, sleep)` no invade la jornada siguiente", () => {
+    const { jornadas } = viajeDesdeMexico(ZONA.DST_MEDIA_HORA, "2026-01-05");
+    const primera = elemento(jornadas, 0);
+    const segunda = elemento(jornadas, 1);
+
+    // Semiabierto: no solapan si y solo si la primera termina en o antes del inicio de la
+    // segunda. Es la misma semántica que la constraint de exclusión de 02 §6.2.
+    expect(Temporal.Instant.compare(primera.sleep, segunda.wake)).toBeLessThanOrEqual(0);
+    expect(primera.wakeSig.equals(segunda.wake)).toBe(true);
+
+    // Y la mitad que hace que el test no sea decorativo: SIN el acotado sí invadiría, y por
+    // exactamente `recorteVigiliaMinutes`. Si alguien quita el `min` por parecer defensivo,
+    // estas dos líneas dicen cuántos minutos se cuentan dos veces.
+    const sleepSinAcotar = primera.sleep.add({ minutes: primera.recorteVigiliaMinutes });
+    expect(Temporal.Instant.compare(sleepSinAcotar, segunda.wake)).toBeGreaterThan(0);
+    expect(segunda.wake.until(sleepSinAcotar).total({ unit: "minute" })).toBe(540);
+  });
+
+  it("un salto de más de 24 h no emite jornada: la reporta en `degeneradas`", () => {
+    // Pacific/Midway (−11) → Pacific/Kiritimati (+14) son 25 h, y los dos están habitados. La
+    // jornada tendría duración NEGATIVA, que rompe el embaldosado de raíz. No lanza, no se
+    // emite a medias y no desaparece: sale en un campo explícito de la salida.
+    const { jornadas, degeneradas } = construirJornadas({
+      ventana: { desde: D("2026-08-03"), hasta: D("2026-08-06") },
+      perfil: perfil("Pacific/Midway", "07:00", "23:00"),
+      excepcionesDia: [],
+      overridesZona: [
+        {
+          during: { desde: I("2026-08-04T00:00:00Z"), hasta: I("2027-01-01T00:00:00Z") },
+          timezone: "Pacific/Kiritimati",
+        },
+      ],
+    });
+
+    expect(degeneradas).toHaveLength(1);
+    const rota = elemento(degeneradas, 0);
+    expect(rota.fecha.toString()).toBe("2026-08-03");
+    expect(rota.wake.toString()).toBe(I("2026-08-03T18:00:00Z").toString());
+    expect(rota.wakeSig.toString()).toBe(I("2026-08-03T17:00:00Z").toString());
+    expect(Temporal.Instant.compare(rota.wakeSig, rota.wake)).toBeLessThan(0);
+
+    // La fecha rota no aparece entre las jornadas emitidas, y las que sí se emiten son sanas.
+    expect(jornadas.map((j) => j.fecha.toString())).toEqual(["2026-08-04", "2026-08-05"]);
+    expect(jornadas.map((j) => j.id)).toEqual([0, 1]);
+    for (const j of jornadas) {
+      expect(Temporal.Instant.compare(j.wake, j.wakeSig)).toBeLessThan(0);
+    }
   });
 });
