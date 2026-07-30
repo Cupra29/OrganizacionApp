@@ -1,6 +1,12 @@
 # QA — Fase 1: Núcleo temporal (`packages/temporal`)
 
-Fecha: 2026-07-29
+Fecha: 2026-07-29. **Actualizado 2026-07-30**: T-1, T-2, T-4, T-5, T-6 (dos lecturas), T-11,
+T-12, T-16, T-17, T-18 y T-19 implementados y verificados contra los valores exactos de este
+documento, commit `c718e06` — 47 tests, 100 % de ramas. Apareció un segundo error de fecha
+(T-2, misma familia que T-4) y una nota sobre la técnica de generación de T-3 (§3.1). Además,
+un hallazgo sin resolver de `arquitecto` sobre la propiedad de embaldosado con viajes hacia el
+este (§3.1, T-3): se deja anotado, sin casos nuevos hasta que se decida.
+
 Estado: escrito antes de que exista código de la fase 1 (solo el guardrail está entregado).
 Cubre: [`05-plan-de-implementacion.md`, fase 1](../arquitectura/05-plan-de-implementacion.md),
 [ADR-003](../arquitectura/adr/ADR-003-modelo-temporal-y-zonas-horarias.md),
@@ -8,7 +14,8 @@ Cubre: [`05-plan-de-implementacion.md`, fase 1](../arquitectura/05-plan-de-imple
 [ADR-018](../arquitectura/adr/ADR-018-expansion-de-recurrencia-sin-rrule.md),
 [03 §3.1 y §10.3](../arquitectura/03-motor-de-planificacion.md).
 Ejecutor esperado: `test-runner`, una vez exista código en `packages/temporal`. Este documento
-es un guion de diseño, no un reporte de ejecución.
+es un guion de diseño, no un reporte de ejecución — la excepción es la nota de implementación
+que se añade donde corresponda, con fecha y commit.
 
 > **Nota de corrección (2026-07-29).** Los cuatro criterios defectuosos y las dos brechas de
 > cobertura de este documento se verificaron y ya están corregidos en `docs/arquitectura/`.
@@ -19,6 +26,12 @@ es un guion de diseño, no un reporte de ejecución.
 > nota explicando cada uno porque dos de los tres son instructivos por sí mismos. La laguna que
 > T-20 destapó sobre cómo se casan `energy_windows` con huecos (enrutada a `arquitecto`) ya
 > está resuelta también — ver el caso actualizado en §3.8.
+>
+> **Nota de corrección (2026-07-30).** Al implementar T-1–T-19 apareció un **cuarto** error de
+> fecha, en T-2, de la misma familia que el de T-4: cadena ISO mal derivada con las duraciones
+> correctas. Corregido con nota en §3.1, y referenciado desde el Hallazgo 1 como segunda
+> instancia del mismo patrón — dos casos con el mismo síntoma en el mismo documento son un
+> argumento más fuerte que uno solo.
 
 ---
 
@@ -72,7 +85,8 @@ instalado antes de fijarlas en código, no solo confiar en esta aritmética manu
 > **Actualización (2026-07-29).** Estas zonas de referencia, incluida la advertencia sobre
 > `America/Mexico_City`, quedaron fijadas en `07 §4.E`. Se mantienen aquí sin cambios porque
 > este documento sigue siendo la fuente de los cálculos a mano que las sostienen — si alguno
-> de ellos resulta erróneo (como ocurrió con T-4, más abajo), la corrección vive aquí, no allí.
+> de ellos resulta erróneo (como ocurrió con T-4 y T-2, más abajo), la corrección vive aquí,
+> no allí.
 
 ---
 
@@ -116,12 +130,18 @@ uno vacío.
 > revisado en §3.1.
 >
 > **Esta corrección deja además la mejor evidencia posible a favor del propio Hallazgo 1,
-> dentro de este mismo documento.** Al aplicar el fixture del Caso T-4 con el pseudocódigo
-> corregido, se detectó que T-4 tenía un error aritmético de 30 minutos: `sueño` y `vigilia`
-> estaban mal individualmente, pero su suma (`sueño + vigilia = 1380 min`) daba el resultado
-> correcto de todos modos — exactamente el defecto que la identidad tautológica no puede
-> detectar, aparecido de forma real y no hipotética en la propia fixture que la denuncia. Ver
-> la nota de corrección en T-4 (§3.2).
+> dentro de este mismo documento — y no una vez, sino dos.** Al aplicar el fixture del Caso
+> T-4 con el pseudocódigo corregido, se detectó que T-4 tenía un error aritmético de 30
+> minutos: `sueño` y `vigilia` estaban mal individualmente, pero su suma (`sueño + vigilia =
+> 1380 min`) daba el resultado correcto de todos modos. **Al implementar T-2 (2026-07-30)
+> apareció el mismo patrón por segunda vez**: la cadena ISO de `sleep` tenía la fecha civil
+> equivocada (un día de menos), pero las duraciones `vigilia = 990 min` y `sueño = 450 min`
+> eran correctas de todos modos, porque ambas se derivan por resta contra el mismo par de
+> instantes mal fechados de forma consistente. Dos instancias del mismo patrón, en el mismo
+> documento, con la misma causa raíz (una identidad de suma que no depende de que los
+> instantes sean los correctos): es exactamente el defecto que la identidad tautológica no
+> puede detectar, aparecido de forma real y no hipotética. Ver las notas de corrección en T-2
+> y T-4 (§3.1 y §3.2).
 
 ### Hallazgo 2 — "`FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR` anclada en miércoles" **no es
 verificable como está escrito**
@@ -214,9 +234,10 @@ sin ningún criterio que las cubra (Hallazgos 5 y 6).
 Formato por caso: **Precondición · Acción · Resultado esperado · Nivel · Automatizar**.
 "Nivel" reemplaza aquí a "Automatizar: a qué nivel" del encargo: para `packages/temporal`
 (paquete puro, sin DB, sin HTTP) los niveles posibles son únicamente **unitario determinista**
-(Vitest, valores exactos) o **property-based** (`fast-check`). Testcontainers y e2e no aplican
-a esta fase — el paquete no tiene I/O por diseño (CLAUDE.md, límite nº1) — y decirlo es parte
-de la auditoría: ningún caso de este documento debería aparecer marcado con esos niveles.
+(Vitest, valores exactos) o **property-based** (`fast-check`, o su equivalente por rejilla
+exhaustiva — ver la nota de T-3). Testcontainers y e2e no aplican a esta fase — el paquete no
+tiene I/O por diseño (CLAUDE.md, límite nº1) — y decirlo es parte de la auditoría: ningún caso
+de este documento debería aparecer marcado con esos niveles.
 
 ### 3.1 `PlanningDay` y aritmética del sueño cruzando medianoche
 
@@ -237,37 +258,51 @@ de la auditoría: ningún caso de este documento debería aparecer marcado con e
     `evidence = { requerido: 480, real: 390, déficit: 90 }`
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad alta — es el caso base de
   toda la fase.
+- **Implementado (2026-07-30, `c718e06`)**: valores confirmados tal cual.
 
 #### Caso T-2 — jornada sin cruce de medianoche, para contraste
 
 - **Precondición**: mismo perfil que T-1 pero `default_sleep_local = 23:30` (mayor que
   `wake`, no cruza).
 - **Acción**: igual.
-- **Resultado esperado**: `sleep = 2026-08-03T05:30:00Z` (23:30 del mismo día `d`, **sin**
-  sumar un día — la rama `si sleep <= wake` de 03 §3.1 **no** se dispara). `vigilia = 990 min`,
+- **Resultado esperado**: `sleep = 2026-08-04T05:30:00Z` (23:30 del mismo día `d`, es decir
+  23:30 + 6 h = 05:30Z del **día siguiente** — la resta de zona cruza medianoche en UTC aunque
+  no cruce en hora local; **sin** que se dispare la rama `si sleep <= wake` de 03 §3.1, que
+  es la que suma un día civil completo por cruce de medianoche *local*). `vigilia = 990 min`,
   `sueño(usando nextWake del día siguiente con wake por defecto 07:00) = 450 min`.
 - **Por qué importa como caso separado**: si T-1 pasara pero este fallara (o viceversa), señala
   que la rama condicional de cruce de medianoche está invertida o que falta el `else`
   implícito. Ningún caso aislado prueba la rama contraria.
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad alta.
+- **Implementado (2026-07-30, `c718e06`)**: `vigilia = 990 min` y `sueño = 450 min`
+  confirmados. Ver nota de corrección abajo sobre la cadena ISO.
+
+> **Nota de corrección (2026-07-30).** La primera versión de este caso decía `sleep =
+> 2026-08-03T05:30:00Z` — la fecha civil equivocada: 23:30 del 3 de agosto en
+> `America/Mexico_City` (UTC−6, sin DST) son las `2026-08-04T05:30:00Z`, un día después, no el
+> mismo. **Las duraciones (`vigilia = 990 min`, `sueño = 450 min`) eran correctas de todos
+> modos** — se derivan por resta contra el mismo par de instantes, así que un desplazamiento
+> consistente de la cadena ISO no las altera. Es la misma familia de error que T-4 (§3.2, ver
+> su propia nota): una cifra derivada (aquí, la fecha en la cadena ISO; ahí, el reparto de
+> minutos entre `sueño` y `vigilia`) estaba mal mientras el valor que de verdad importaba para
+> el test daba bien. Ver el Hallazgo 1 (§2), ahora con esta como segunda instancia.
 
 #### Caso T-3 (property-based) — las jornadas embaldosan la línea de tiempo (propiedad
 oficial adoptada en `docs/arquitectura`, sustituye a la tautológica del Hallazgo 1)
 
-- **Precondición**: generador `fast-check` de perfiles válidos (horas locales arbitrarias,
-  incluidos los que cruzan medianoche) y ventanas arbitrarias de al menos 3 días, incluyendo
-  generaciones con un `timezone_override` que empieza o termina a mitad de la ventana —
-  deliberado: es exactamente el borde donde vivía el bug real de `wakeSig` calculado con la
-  zona del día `d` en vez de la del día `d+1` (corregido en `03 §3.1` al escribir este
-  criterio).
-- **Acción**: `construirJornadas` para toda la ventana, 1000 casos generados. Tomar cada par
-  de jornadas consecutivas `(jornada[i], jornada[i+1])`.
+- **Precondición**: generador de perfiles válidos (horas locales arbitrarias, incluidos los
+  que cruzan medianoche) y ventanas arbitrarias de al menos 3 días, incluyendo generaciones
+  con un `timezone_override` que empieza o termina a mitad de la ventana — deliberado: es
+  exactamente el borde donde vivía el bug real de `wakeSig` calculado con la zona del día `d`
+  en vez de la del día `d+1` (corregido en `03 §3.1` al escribir este criterio).
+- **Acción**: `construirJornadas` para toda la ventana. Tomar cada par de jornadas
+  consecutivas `(jornada[i], jornada[i+1])`.
 - **Resultado esperado**:
   - `∀ i: jornada[i].wakeSig == jornada[i+1].wake` — **embaldosado**: el fin de vigilia-más-
     sueño de una jornada es exactamente el inicio de la siguiente, sin huecos ni solapes entre
     jornadas consecutivas.
   - `∀ jornada: wake < sleep < wakeSig`, estrictamente (ninguna jornada de duración cero ni
-    invertida).
+    invertida). **Ver el aviso de 2026-07-30 más abajo: esta mitad está bajo revisión.**
 - **Por qué esta propiedad sí tiene contenido, a diferencia de la tautológica**: el bug real
   que apareció al corregir `03 §3.1` (zona equivocada para `wakeSig`) rompe el embaldosado
   justo en el borde de un cambio de zona — con la zona equivocada, `jornada[i].wakeSig` se
@@ -276,11 +311,43 @@ oficial adoptada en `docs/arquitectura`, sustituye a la tautológica del Hallazg
   en cuanto hay un `timezone_override` que cambia de zona exactamente ahí, dejan de coincidir y
   la propiedad lo detecta. La identidad `sueño + vigilia == nextWake − wake` de la versión
   original **no** lo habría detectado nunca, porque es verdadera para cualquier trío de
-  instantes sin importar si están bien calculados — ver la nota de T-4 para una instancia real
-  de ese mismo tipo de problema (ahí por una constante mal copiada, no por una zona, pero con
-  idéntico síntoma: el total correcto esconde componentes incorrectos).
-- **Nivel**: property-based. **Automatizar**: sí, prioridad máxima — es ahora la propiedad
-  oficial del criterio de aceptación corregido.
+  instantes sin importar si están bien calculados — ver las notas de T-2 y T-4 para dos
+  instancias reales de ese mismo tipo de problema (ahí por constantes/fechas mal derivadas, no
+  por una zona, pero con idéntico síntoma: el total o la duración correctos esconden un
+  componente incorrecto).
+- **Nivel**: property-based (ver nota de técnica abajo). **Automatizar**: sí, prioridad
+  máxima — es ahora la propiedad oficial del criterio de aceptación corregido.
+- **Implementado (2026-07-30, `c718e06`)**, con dos notas:
+
+  > **Nota de técnica (2026-07-30).** Este documento proponía `fast-check` para generar los
+  > 1000 casos. `engine-dev` implementó en su lugar un **producto cartesiano exhaustivo**: 5
+  > zonas × 5 horarios × 8 anclas × 9 configuraciones de viaje = 9000 jornadas, más 365 días
+  > consecutivos en cuatro zonas. El argumento — una rejilla exhaustiva no depende del día en
+  > que corre la suite (a diferencia de un generador con semilla implícita en la fecha o el
+  > entorno) y evita añadir `fast-check` como dependencia — se acepta. La exigencia de número
+  > de casos no cambia (se cumple de sobra: 9000+ contra los 1000 propuestos); lo que cambia es
+  > la **etiqueta de nivel**, que pasa de "property-based con generador aleatorio" a
+  > "exhaustivo por rejilla" — la garantía que importa (cobertura sistemática de combinaciones,
+  > no aleatoriedad con semilla) se mantiene igual o mejor, y es coherente con el límite nº9 de
+  > `CLAUDE.md` ("aleatoriedad prohibida en el motor... los desempates son un orden total
+  > explícito") aunque ese límite hable del motor y no de los tests: una rejilla determinista
+  > es, si acaso, más alineada con el espíritu del proyecto que un generador con semilla.
+
+  > **Hallazgo sin resolver (2026-07-30), de `arquitecto`, no decidido por este documento.** La
+  > mitad estricta de esta propiedad — `sleep < wakeSig` (equivalente a `sueñoMinutes > 0`) —
+  > **es falsa** con un `timezone_override` hacia el este suficientemente grande: México→Madrid
+  > con una necesidad de sueño de 8 h da `sueñoMinutes === 0`; México→Lord Howe lo da
+  > **negativo**. **No es un bug de la implementación**: los instantes de `wake`/`sleep`/
+  > `wakeSig` son correctos y el embaldosado (`wakeSig[i] == wake[i+1]`) se mantiene — lo que
+  > ocurre es que la persona cruza husos horarios y su noche, medida en instantes absolutos, se
+  > comprime o se invierte. Es una pregunta de **qué significa un sueño negativo** (¿se trunca
+  > a cero? ¿es un `INFEASIBLE` de jornada? ¿es un `Finding` nuevo, distinto de `SLEEP_DEBT`,
+  > porque el mecanismo es geográfico y no de duración insuficiente por elección?), no de
+  > aritmética. **Este documento no escribe casos para esto todavía, a propósito**: esperar a
+  > que `arquitecto` decida qué significa, y entonces añadir los casos T-3x que correspondan
+  > (como mínimo: México→Madrid con `sueñoMinutes == 0` como caso límite exacto, y
+  > México→Lord Howe con `sueñoMinutes < 0` como el caso que fuerza la decisión). Ver ítem
+  > nuevo en "qué falta" (§4).
 
 ---
 
@@ -300,6 +367,8 @@ oficial adoptada en `docs/arquitectura`, sustituye a la tautológica del Hallazg
   - `vigilia = 960 min`, `sueño = 420 min`, **total = 1380 min = 23 h exactas**, no 24 h.
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad máxima — es el criterio
   textual de la fase, con cifras.
+- **Implementado (2026-07-30, `c718e06`)**: valores confirmados tal cual (ya con la
+  corrección de 2026-07-29 aplicada).
 
 > **Nota de corrección (2026-07-29).** La primera versión de este caso decía `sleep =
 > 2026-03-08T05:30:00Z`, `vigilia = 990 min`, `sueño = 390 min` — un error de 30 minutos,
@@ -310,7 +379,9 @@ oficial adoptada en `docs/arquitectura`, sustituye a la tautológica del Hallazg
 > una instancia real de exactamente la clase de error que la property test tautológica
 > `sueño + vigilia == nextWake − wake` no puede detectar: los componentes estaban mal y la
 > identidad se cumplía igual. Se deja esta nota en vez de solo corregir el número, porque el
-> caso vale más como evidencia que como cifra correcta.
+> caso vale más como evidencia que como cifra correcta. **Actualización 2026-07-30: T-2
+> (§3.1) resultó tener el mismo patrón, esta vez en la fecha de la cadena ISO en lugar de en
+> el reparto de minutos — ver su nota.**
 
 #### Caso T-5 — jornada de 25 h (atraso de reloj)
 
@@ -320,6 +391,7 @@ oficial adoptada en `docs/arquitectura`, sustituye a la tautológica del Hallazg
 - **Resultado esperado**: `wake = 2026-10-31T12:00:00Z` (07:00 CDT), `nextWake =
   2026-11-01T13:00:00Z` (07:00 **CST**). Diferencia total = **1500 min = 25 h exactas**.
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad máxima.
+- **Implementado (2026-07-30, `c718e06`)**: confirmado tal cual.
 
 #### Caso T-6 — turno de 720 min que cruza el adelanto: las dos lecturas del criterio, lado a
 lado (cierra el Hallazgo 4)
@@ -338,6 +410,7 @@ lado (cierra el Hallazgo 4)
   la transición" y no "el día del cambio de horario".
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad máxima — sin la Lectura B
   explícita, es fácil implementar (o revisar) el fixture equivocado y no darse cuenta.
+- **Implementado (2026-07-30, `c718e06`)**: las dos lecturas confirmadas tal cual.
 
 ---
 
@@ -514,6 +587,7 @@ recortar)
   mismo valor de "02:30" no sirve para ejercitar ambas ramas en esa familia de reglas. Ver
   Hallazgo 3.
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad máxima.
+- **Implementado (2026-07-30, `c718e06`)**: las dos ocurrencias confirmadas tal cual.
 
 #### Caso T-12 — la trampa de conversión explícita (control negativo)
 
@@ -529,6 +603,7 @@ recortar)
 - **Nivel**: unitario determinista. **Automatizar**: opcional — es más una nota de
   implementación que una regresión que vigilar en producción, pero barato de incluir como test
   negativo explícito.
+- **Implementado (2026-07-30, `c718e06`)**: confirmado tal cual.
 
 ---
 
@@ -597,6 +672,7 @@ relación con DST)
   disponibilidad de esos huecos existiera. Las ocurrencias del 4/6 (antes del viaje) y del
   18/20 (después) sí aparecen, ancladas a `America/Mexico_City` sin cambios.
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad alta.
+- **Implementado (2026-07-30, `c718e06`)**: confirmado tal cual.
 
 #### Caso T-17 — `FIXED_ZONE`: la hora sigue la zona de origen aunque el usuario viaje
 
@@ -608,6 +684,7 @@ relación con DST)
   que el usuario está en `Europe/Madrid` esos días. `timezone_overrides` no se consulta en
   absoluto para este compromiso.
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad alta.
+- **Implementado (2026-07-30, `c718e06`)**: confirmado tal cual.
 
 #### Caso T-18 — `LOCAL_WHEREVER`: la hora sigue la zona del override durante el viaje
 
@@ -618,20 +695,25 @@ relación con DST)
   (`2026-08-11T05:00:00Z`, CEST +2), no a las 07:00 de Ciudad de México. Las ocurrencias
   fuera de la ventana del override usan `America/Mexico_City` normalmente.
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad alta.
+- **Implementado (2026-07-30, `c718e06`)**: confirmado tal cual.
 
 #### Caso T-19 (property-based) — exactamente un `anchor` determina el comportamiento, nunca
 una combinación
 
 - **Precondición**: generador de compromisos con los tres valores de `anchor` y ventanas de
   `timezone_overrides` arbitrarias (solapadas y no solapadas con las ocurrencias).
-- **Acción**: expandir 1000 combinaciones generadas.
+- **Acción**: expandir las combinaciones generadas.
 - **Resultado esperado**: `∀` ocurrencia dentro de un override activo: si `anchor =
   SUSPEND_WHEN_AWAY` ⇒ ausente; si `anchor = FIXED_ZONE` ⇒ mismo instante UTC que sin
   override; si `anchor = LOCAL_WHEREVER` ⇒ mismo instante de pared que el override declara.
   Ninguna combinación produce un resultado fuera de estos tres.
-- **Nivel**: property-based. **Automatizar**: sí, prioridad alta — sin este test, los tres
+- **Nivel**: property-based (ver la nota de técnica de T-3: la implementación real usó rejilla
+  exhaustiva de zonas × horarios × anclas × configuraciones de viaje, no un generador con
+  semilla, y aplica igual aquí). **Automatizar**: sí, prioridad alta — sin este test, los tres
   casos T-16/17/18 solo prueban que *existe* un camino correcto para cada valor, no que no hay
   un cuarto camino accidental cuando se combinan overrides solapados.
+- **Implementado (2026-07-30, `c718e06`)**: confirmado dentro de la rejilla de 9000 jornadas
+  descrita en T-3.
 
 ---
 
@@ -817,7 +899,8 @@ que un ADR trata como decisión central.
    como resuelto, para que el historial de la auditoría quede completo.
 3. **Resolución de `timezone_overrides` + `anchor` (los tres valores) no tiene ningún
    criterio de aceptación**, pese a ser "puerta de una sola dirección" en ADR-003 y entrega
-   explícita de esta fase (Hallazgo 6). Propuesto en §3.7 (T-16 a T-19).
+   explícita de esta fase (Hallazgo 6). Propuesto en §3.7 (T-16 a T-19). **Implementado
+   2026-07-30, `c718e06`.**
 4. **El reporte de excepciones huérfanas (ADR-018 §7, "nunca descarte silencioso") no tiene
    ningún criterio propio** — solo hay uno para la supervivencia (que la excepción siga
    apuntando bien), ninguno para el fallo del anclaje. Propuesto en §3.6 (T-14, T-15).
@@ -839,7 +922,9 @@ que un ADR trata como decisión central.
     `engine-dev`, pero sin casos concretos de canario positivo/negativo — el mismo tipo de
     hueco que causó el fallo silencioso original de `dependency-cruiser` en la fase 0. Ver
     documento separado
-    [`fase-1-guardrail-temporal-now.md`](./fase-1-guardrail-temporal-now.md).
+    [`fase-1-guardrail-temporal-now.md`](./fase-1-guardrail-temporal-now.md). **Implementado
+    y verificado 2026-07-30, `eaf92f2`** — ver ese documento para el resultado y para la
+    ampliación no anticipada de `globalThis`.
 11. **Offset no entero (`Asia/Kolkata`, +05:30) y cambios históricos de zona**, nombrados en
     03 §10.3 como necesarios para la suite de aritmética temporal, sin ningún fixture
     concreto en ningún documento. Menor prioridad que 1–10 porque no protege una decisión de
@@ -856,29 +941,43 @@ que un ADR trata como decisión central.
     documento de QA todavía; no son de esta fase (viven en `packages/engine`, fases 3–4), así
     que no se proponen aquí, pero quedan anotados para que quien escriba el QA de esa fase no
     los redescubra desde cero.
+13. **Nuevo (2026-07-30). Qué significa un `sueño` de duración cero o negativa con un
+    `timezone_override` hacia el este no está decidido**, y `arquitecto` lo está mirando ahora
+    (descubierto al implementar T-3): México→Madrid con necesidad de sueño de 8 h da
+    `sueñoMinutes === 0`; México→Lord Howe lo da negativo. El embaldosado se mantiene y no es
+    un bug — es que cruzar husos hacia el este comprime la noche medida en instantes
+    absolutos. **Sin casos propuestos todavía, a propósito**: este documento espera la
+    decisión de `arquitecto` sobre qué significa (¿se trunca a cero? ¿es una forma nueva de
+    `INFEASIBLE`? ¿un `Finding` distinto de `SLEEP_DEBT`, con causa geográfica y no de
+    elección?) antes de escribir T-3x. Cuando se decida, como mínimo hacen falta dos casos:
+    México→Madrid como el límite exacto (`sueñoMinutes == 0`) y México→Lord Howe como el caso
+    que fuerza la decisión (`sueñoMinutes < 0`). Prioridad alta en cuanto se resuelva — hasta
+    entonces, no se puede escribir un resultado esperado sin inventar la decisión de
+    arquitectura que le corresponde a `arquitecto`.
 
 ---
 
 ## 5. Automatización — resumen
 
-| Área | Casos | Nivel | Prioridad |
-|---|---|---|---|
-| `PlanningDay` y sueño | T-1, T-2 (alta); T-3 (máxima, propiedad oficial) | Unitario + property | Alta / máxima |
-| Jornadas y DST | T-4, T-5, T-6 | Unitario | Máxima |
-| Álgebra de intervalos | T-7.1–T-7.5 | Unitario | Máxima (T-7.1, T-7.4), alta (resto) |
-| Expansión etapa 1 | T-8, T-9, T-10 | Unitario + oráculo diferencial | Máxima |
-| Expansión etapa 2 | T-11, T-12 | Unitario | Máxima (T-11), opcional (T-12) |
-| Excepciones ancladas | T-13, T-14, T-15 | Unitario | Alta |
-| Zona / `anchor` | T-16–T-19 | Unitario + property | Alta |
-| Cronotipo 22–01 | T-20, T-20.1 | Unitario | Máxima (T-20, ya resuelto sin pendientes); media (T-20.1) |
-| Validador — rechazos | T-21–T-31 | Unitario | Alta |
-| `effective_*` / `UNTIL` | T-32, T-33 | Unitario | Alta |
-| `WKST` / `week_starts_on` | T-34 | Unitario | Alta |
-| Guardrail `Temporal.Now` | ver documento separado | Integración de configuración | Alta |
+| Área | Casos | Nivel | Prioridad | Estado |
+|---|---|---|---|---|
+| `PlanningDay` y sueño | T-1, T-2 (alta); T-3 (máxima, propiedad oficial) | Unitario + exhaustivo por rejilla | Alta / máxima | ✅ T-1, T-2 implementados (`c718e06`); T-3 implementada salvo la mitad estricta bajo revisión (ver §3.1) |
+| Jornadas y DST | T-4, T-5, T-6 | Unitario | Máxima | ✅ implementados (`c718e06`) |
+| Álgebra de intervalos | T-7.1–T-7.5 | Unitario | Máxima (T-7.1, T-7.4), alta (resto) | Sin implementar aún (fuera de este lote) |
+| Expansión etapa 1 | T-8, T-9, T-10 | Unitario + oráculo diferencial | Máxima | Sin implementar aún (fuera de este lote) |
+| Expansión etapa 2 | T-11, T-12 | Unitario | Máxima (T-11), opcional (T-12) | ✅ implementados (`c718e06`) |
+| Excepciones ancladas | T-13, T-14, T-15 | Unitario | Alta | Sin implementar aún (fuera de este lote) |
+| Zona / `anchor` | T-16–T-19 | Unitario + exhaustivo por rejilla | Alta | ✅ implementados (`c718e06`) |
+| Cronotipo 22–01 | T-20, T-20.1 | Unitario | Máxima (T-20, ya resuelto sin pendientes); media (T-20.1) | Sin implementar aún (fuera de este lote) |
+| Validador — rechazos | T-21–T-31 | Unitario | Alta | Sin implementar aún (fuera de este lote) |
+| `effective_*` / `UNTIL` | T-32, T-33 | Unitario | Alta | Sin implementar aún (fuera de este lote) |
+| `WKST` / `week_starts_on` | T-34 | Unitario | Alta | Sin implementar aún (fuera de este lote) |
+| Guardrail `Temporal.Now` | ver documento separado | Integración de configuración | Alta | ✅ implementado (`eaf92f2`) |
 
 **Fuera de alcance de este documento**: Testcontainers y e2e no aplican — `packages/temporal`
 no tiene I/O. Cobertura de ramas ≥95 % (ya en el criterio del plan) se verifica con el
-`vitest.config.ts` raíz, no es un caso de este documento.
+`vitest.config.ts` raíz — el lote implementado en `c718e06` reporta 100 % de ramas sobre los
+47 tests que cubre, no es un caso de este documento en sí.
 
 ---
 
@@ -886,4 +985,4 @@ no tiene I/O. Cobertura de ramas ≥95 % (ya en el criterio del plan) se verific
 
 | Fecha | Quién / commit | Casos ejecutados | Resultado | Hallazgos |
 |---|---|---|---|---|
-| | | | | |
+| 2026-07-30 | `engine-dev`, commit `c718e06` | T-1, T-2, T-4, T-5, T-6 (dos lecturas), T-11, T-12, T-16, T-17, T-18, T-19 | 47 tests, 100 % de ramas. Todos los valores exactos confirmados tras la corrección de T-2 | Segundo error de fecha de la misma familia que T-4, esta vez en T-2 (cadena ISO con un día de menos; duraciones correctas) — corregido, ver Hallazgo 1 y nota en T-2. T-3/T-19 implementados con técnica distinta a la propuesta (rejilla exhaustiva de 9000+ jornadas en vez de `fast-check`), aceptado sin cambiar la exigencia de casos. Hallazgo sin resolver de `arquitecto`: la mitad estricta de T-3 (`sleep < wakeSig`) es falsa con viajes hacia el este suficientemente grandes (México→Madrid da 0, México→Lord Howe da negativo); casos nuevos pendientes de esa decisión (ver "qué falta", ítem 13) |
