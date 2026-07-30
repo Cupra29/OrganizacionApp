@@ -11,7 +11,7 @@
     "typecheck": "pnpm -r --no-bail run typecheck",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "test:engine": "vitest run --project @oa/engine",
     "depcruise": "depcruise packages apps --config .dependency-cruiser.cjs",
     "depcruise:cobertura": "depcruise packages apps --config .dependency-cruiser.cjs --output-type json | node scripts/verificar-cobertura-grafo.mjs",
@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
     "dependency-cruiser": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
