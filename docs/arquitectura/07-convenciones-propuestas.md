@@ -233,19 +233,46 @@ criterios de `qa-engineer`. **El bloque D de la §3 queda superado por el D2 de 
 antes de que existiera el plugin GritQL y antes de saber que `Temporal.Now` también hay que
 vigilarlo. Si aún no se ha aplicado el D, aplíquese directamente el D2.
 
+> **Actualizado el 2026-07-30 contra el código, no contra el plan.** Con el commit `eaf92f2` ya
+> existe el guardrail implementado, y el D2 se había escrito antes: su lista de formas prohibidas
+> **no incluía `globalThis`** y no mencionaba que ADR-018 §1 pasó de convención escrita a **regla
+> mecanizada** de `dependency-cruiser`. Lo de abajo describe lo que hay, no lo que se pensaba
+> poner. Ver la nota fechada de ADR-018 §9 para por qué lo implementado es más ancho que lo que ese
+> párrafo enumeraba.
+
 ### D2. Sustituye el límite nº 1 de "Límites que no se cruzan"
 
 ```markdown
 1. `packages/engine` y `packages/temporal` **no tienen dependencias de I/O**: ni base de
    datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un parámetro. Y **la zona
-   horaria también es un parámetro**: en el núcleo no se lee nunca la zona del proceso.
-   `dependency-cruiser` sostiene la mitad de imports y **está demostrado que salta**; la otra
-   mitad la sostiene el plugin GritQL `sin-reloj-ni-azar-en-nucleo.grit`, con
-   `pnpm guardrail:cobertura` verificando que sigue viendo los cuatro paquetes del alcance
-   (`engine`, `temporal`, `domain`, `ical` — este último por ADR-017). Formas prohibidas:
-   `Date.now`, `Math.random`, `new Date()`, `Temporal.Now` (cualquier miembro),
-   `Intl.DateTimeFormat().resolvedOptions().timeZone` y `performance.now`. Permitidas y no
-   disparan: `new Date(argumento)`, `Math.max`, `Math.floor`.
+   horaria también es un parámetro**: en el núcleo no se lee nunca la zona del proceso ni el
+   locale del entorno.
+
+   Tres mecanizaciones, ninguna sustituye a las otras:
+   - **`dependency-cruiser`** para lo que se ve en los **imports** (`sin-io-en-nucleo`,
+     `sin-io-nativo-en-nucleo`), **demostrado que salta** en las dos mitades: paquetes npm y
+     built-ins de Node.
+   - **Plugin GritQL `sin-reloj-ni-azar-en-nucleo.grit`** para lo que es **global y no módulo**,
+     que ninguna configuración de `dependency-cruiser` puede ver. Prohibido: `Date.now`,
+     `Math.random`, `new Date()` y `new Date` sin paréntesis, `Temporal.Now` (cualquier miembro),
+     `performance.now`, cualquier acceso a `resolvedOptions` (la zona y el locale ambientes), y
+     **`globalThis` entero** — es la puerta de atrás a todos los anteriores, incluidas
+     `globalThis.crypto` y `globalThis.process.env.TZ`. Permitidas y **no** disparan:
+     `new Date(argumento)`, `Math.max`, `Math.floor`, `Temporal.PlainDate.from(…)` y
+     `new Intl.DateTimeFormat(locale, { timeZone })` con la zona explícita.
+   - **`polyfill-temporal-solo-en-su-modulo`** (`dependency-cruiser`): `packages/temporal/src/
+     temporal.ts` es el **único** importador de `temporal-polyfill` en todo el monorepo, apps
+     incluidas. Un segundo import traería una **segunda implementación** de `Temporal` al mismo
+     proceso, cuyos objetos no aceptan los métodos de la otra: falla en ejecución, no al compilar,
+     y ningún test de un solo paquete lo ve. Ver ADR-018 §1.
+
+   Alcance del guardrail de globales: `engine`, `temporal`, `domain` e `ical` — este último por
+   ADR-017, por reproducibilidad del `.ics` y no por el límite de I/O. Fuera de esos cuatro el reloj es legítimo: `apps/api` lo lee
+   y materializa el `now` que el motor recibe como parámetro.
+
+   `pnpm depcruise:cobertura` y `pnpm guardrail:cobertura` verifican que **cada guardrail siga
+   mirando lo que debe**: los dos fallan en silencio verde si dejan de ver un paquete, y eso ya
+   pasó una vez. **Si necesitas una excepción, es un ADR, no un `biome-ignore`.**
 ```
 
 ### E. Añade a `## Convenciones de dominio`
@@ -255,8 +282,9 @@ horario se escribe con `America/Mexico_City` y **pasa en verde sin ejercitar nad
 
 ```markdown
 - **`Temporal` se importa siempre desde `@oa/temporal`**, que lo reexporta desde su único módulo
-  `src/temporal.ts`. Ningún otro archivo del monorepo importa el polyfill: es lo que hace que
-  cambiarlo, o pasar a `Temporal` nativo cuando llegue al LTS, sea una línea (ADR-018).
+  `src/temporal.ts`. Ningún otro archivo del monorepo importa el polyfill —lo verifica
+  `dependency-cruiser`, no es honor system— y es lo que hace que cambiarlo, o pasar a `Temporal`
+  nativo cuando llegue al LTS, cueste un archivo y no una búsqueda por todo el repo (ADR-018 §1).
 - **Políticas horarias, elegidas y no heredadas** (ADR-018 §4): desambiguación `'compatible'`
   (hora inexistente → se desplaza adelante; ambigua → la primera); las duraciones son **minutos
   reales sobre la línea de instantes**, nunca hora de pared; `WKST` es siempre `MO` en la

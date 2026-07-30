@@ -225,6 +225,52 @@ en la prohibición con el mismo argumento que el reloj: en el núcleo, la zona e
 parámetro. La implementación es de `engine-dev` sobre el plugin y el verificador de cobertura que
 ya existen.
 
+> **Nota fechada (2026-07-30) — lo implementado es más ancho que esta lista; la decisión es la
+> misma.** Al entrar el primer código de la fase 1 (`eaf92f2`, el módulo único de `Temporal`),
+> `engine-dev` implementó el guardrail con tres desviaciones respecto al texto de arriba,
+> verificadas una por una. **Ninguna es una contradicción: las tres prohíben *más* en la misma
+> dirección**, que es la única dirección en la que este párrafo se puede desviar sin reabrirse.
+>
+> 1. **`resolvedOptions` en lectura amplia**, sin anclar el receptor, en vez de la forma literal
+>    `Intl.DateTimeFormat().resolvedOptions().timeZone` que nombra este §9. La forma literal se
+>    esquiva partiendo la expresión en dos sentencias (`const o = …resolvedOptions();` y `o.timeZone`
+>    más abajo) y no ve `new Intl.DateTimeFormat("es-MX").resolvedOptions()`. **Un guardrail que cae
+>    con un refactor de dos líneas no es un guardrail.** Efecto colateral aceptado y que conviene
+>    nombrar: la lectura amplia prohíbe también `locale`, `calendar` y `numberingSystem` ambientes,
+>    no solo `timeZone`. Es coherente —los cuatro son estado del entorno y en el núcleo el entorno
+>    es un parámetro— y no cuesta nada hoy, porque estos cuatro paquetes no formatean para humanos.
+>    Trae un falso positivo conocido: un objeto propio con un método llamado `resolvedOptions`. Si
+>    algún día aparece de verdad, la respuesta es un ADR, **no un `biome-ignore`** — misma doctrina
+>    que [ADR-017](./ADR-017-determinismo-del-ics.md) fijó para `ical`.
+> 2. **`globalThis` prohibido entero**, con diagnóstico propio. Este §9 no lo menciona, y aun así
+>    **no es una decisión nueva: es la mecanización de una que este ADR ya había tomado**. En
+>    "Alternativas consideradas" se descarta parchear `globalThis.Temporal` con nuestro polyfill,
+>    por comportamiento dependiente del orden de importación. Prohibir el identificador convierte
+>    ese descarte, que era prosa, en algo que CI puede ver. Y es la puerta de atrás a todos los
+>    demás patrones: ninguno casa con `globalThis.Date.now()` ni con `globalThis.Temporal.Now`,
+>    porque el receptor deja de ser el identificador literal.
+> 3. **Dos formas que nadie había enumerado**, que aparecieron justamente por atajar el receptor en
+>    vez de listar miembros: `globalThis.crypto.getRandomValues()` —azar— y
+>    **`globalThis.process.env.TZ`, que es literalmente el modo de fallo por el que este ADR
+>    descartó `rrule`**. Que la vía de escape hacia la zona del proceso siguiera abierta dentro del
+>    núcleo, en el mismo documento que rechaza una biblioteca por depender de ella, es el mejor
+>    argumento de que la lista enumerada de este §9 era el enfoque equivocado.
+>
+> **Por qué nota y no ADR de reemplazo.** La decisión de fondo —el reloj, el azar y la zona
+> ambiente son parámetros en el núcleo, y el alcance son los mismos cuatro paquetes— no cambia; lo
+> que cambia es la anchura de los patrones, que este mismo §9 delega explícitamente en `engine-dev`.
+> **Lo que sí exigiría un ADR es lo contrario:** estrechar un patrón, sacar un paquete del alcance,
+> o admitir la primera excepción.
+>
+> **Un cabo que esta ampliación deja abierto, y conviene no descubrirlo dentro de dos años.** El
+> apartado "Lo que queda condicionado" de más abajo dice que, cuando `Temporal` nativo llegue a un
+> LTS, *"el polyfill sale (una línea)"*. Con `globalThis` prohibido en el núcleo, esa línea **no
+> puede ser** la más obvia (`export const Temporal = globalThis.Temporal`), que es además la que
+> describe hoy el comentario de cabecera de `packages/temporal/src/temporal.ts`. Hay salida sin
+> tocar la prohibición —el identificador global desnudo `Temporal` no está prohibido, solo el
+> miembro `Temporal.Now`— así que **no es un bloqueo, es una línea distinta de la que alguien
+> supondrá**. Corresponde a `engine-dev` ajustar ese comentario cuando toque.
+
 ## Alternativas consideradas
 
 **`rrule` en producción, como decía el plan, aislando la frontera de conversión.**
