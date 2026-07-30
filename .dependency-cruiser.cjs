@@ -14,8 +14,11 @@ const IO_EXTERNO = "drizzle-orm|fastify|pg|postgres|react|react-dom|axios|undici
 // Built-ins de Node que implican I/O, reloj o aleatoriedad. `os` y `process` quedan
 // fuera a propósito: no son I/O y prohibirlos daría falsos positivos.
 //
-// OJO: `Date.now()`, `new Date()` y `Math.random()` NO son imports, así que
-// dependency-cruiser no puede verlos con ninguna configuración. Esa otra mitad la
+// OJO: `Date.now()`, `new Date()`, `Math.random()`, `Temporal.Now`, la zona ambiente
+// (`resolvedOptions`) y `globalThis` NO son imports, así que dependency-cruiser no puede
+// verlos con ninguna configuración. Nótese que `crypto` y `perf_hooks` sí están en la lista de
+// abajo, pero solo cierran la puerta del import: `globalThis.crypto` y `performance.now()`
+// están disponibles sin importar nada, y esos los para el plugin. Esa otra mitad la
 // cubre desde la fase 1 el plugin GritQL `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit`
 // (no `noRestrictedGlobals`, que mataría `new Date(argumento)` y `Math.max`; tampoco un
 // test de arquitectura), cuyo alcance declara el `overrides` de biome.json y verifica
@@ -74,6 +77,22 @@ module.exports = {
       severity: "error",
       from: { path: NUCLEO },
       to: { dependencyTypes: ["core"], path: `^(node:)?(${IO_NATIVO})$` },
+    },
+    {
+      name: "polyfill-temporal-solo-en-su-modulo",
+      comment:
+        "ADR-018 §1: `packages/temporal/src/temporal.ts` es el ÚNICO punto de import del " +
+        "polyfill en todo el monorepo. No es higiene, son dos propiedades concretas. (1) Un " +
+        "segundo import puede traer una SEGUNDA implementación de `Temporal` al mismo " +
+        "proceso, y los objetos de una no los aceptan los métodos de la otra: falla en " +
+        "ejecución por comprobación de ranura interna, no al compilar, y ningún test de un " +
+        "solo paquete lo ve. Es el motivo por el que `rrule-temporal` se quedó en " +
+        "devDependency. (2) Es lo que hace que cambiar de polyfill, o pasar a `Temporal` " +
+        "nativo cuando llegue al LTS, cueste una línea. Hoy esta regla pasa sin hacer nada, " +
+        "porque hay exactamente un importador: por eso se pone hoy y no cuando haya dos.",
+      severity: "error",
+      from: { path: "^(packages|apps)/", pathNot: "^packages/temporal/src/temporal\\.ts$" },
+      to: { path: "node_modules/temporal-polyfill/" },
     },
 
     // ---------- Dirección de las flechas (01 §6) ----------
