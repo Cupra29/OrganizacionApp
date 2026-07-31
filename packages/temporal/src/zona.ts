@@ -6,16 +6,14 @@
 // La zona **nunca** se lee del entorno: entra como parámetro, igual que `now`. El guardrail
 // `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit` lo mecaniza, pero la razón es de diseño.
 
+// `IntervaloInstantes` se importa de `intervalos.ts` y la flecha va en ese sentido, no en el
+// contrario: un intervalo es un par de instantes absolutos y no tiene ninguna zona dentro. Que su
+// álgebra dependiera de este módulo diría lo contrario en el grafo de dependencias.
+import type { IntervaloInstantes } from "./intervalos.ts";
 import { Temporal } from "./temporal.ts";
 
 /** Identificador IANA (`'America/Mexico_City'`). Nunca un offset numérico: ADR-003 lo descarta. */
 export type ZonaIana = string;
-
-/** Intervalo de instantes semiabierto `[desde, hasta)`, la misma semántica que `tstzrange`. */
-export interface IntervaloInstantes {
-  readonly desde: Temporal.Instant;
-  readonly hasta: Temporal.Instant;
-}
 
 /** Una fila de `timezone_overrides` (02 §3): un viaje. */
 export interface OverrideZona {

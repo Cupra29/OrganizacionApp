@@ -105,6 +105,24 @@ module.exports = {
       to: { path: "node_modules/temporal-polyfill/" },
     },
     {
+      name: "etapa-1-de-expansion-sin-zonas",
+      comment:
+        "ADR-018 §2: la expansión está partida en dos etapas y la etapa 1 —`expansion.ts`, el " +
+        "conjunto de fechas civiles— NO tiene zonas. No es higiene de capas: es la razón por la " +
+        "que `RRULE` y `CYCLE` son dos implementaciones de la misma firma y la parte difícil " +
+        "—resolver una fecha civil a un intervalo absoluto— está escrita y probada UNA vez, en " +
+        "`ocurrencias.ts`. Si la etapa 1 pudiera mirar la zona, la tentación inmediata sería " +
+        "comparar `UNTIL` como instante ahí dentro (que es donde parece que va) y entonces la " +
+        "aritmética de cambios de horario volvería a estar en dos sitios: uno probado y otro no. " +
+        "Se prohíbe el import directo, que es la forma que toma la fuga: no se resuelve una hora " +
+        "de pared sin traerse `zonedDe` o `instanteDe`. Queda fuera del alcance la arista " +
+        "transitiva `expansion.ts -> jornadas.ts -> zona.ts`, que es de solo tipos " +
+        "(`VentanaFechas`) y no lleva ninguna zona consigo.",
+      severity: "error",
+      from: { path: "^packages/temporal/src/expansion\\.ts$" },
+      to: { path: "^packages/temporal/src/(zona|ocurrencias)\\.ts$" },
+    },
+    {
       name: "el-oraculo-no-entra-en-produccion",
       comment:
         "ADR-018 §8: `rrule-temporal` es el ORÁCULO DIFERENCIAL de la expansión, no una " +
