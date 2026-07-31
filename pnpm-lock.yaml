@@ -15,6 +15,9 @@ catalogs:
     dependency-cruiser:
       specifier: ^18.1.0
       version: 18.1.0
+    rrule-temporal:
+      specifier: ^2.0.2
+      version: 2.0.2
     temporal-polyfill:
       specifier: ^1.0.2
       version: 1.0.2
@@ -109,6 +112,9 @@ importers:
         specifier: 'catalog:'
         version: 1.0.2
     devDependencies:
+      rrule-temporal:
+        specifier: 'catalog:'
+        version: 2.0.2
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -673,6 +679,9 @@ packages:
     resolution: {integrity: sha512-t9z29cJjXf/vxQ8dyhCSpt6H6aSwHTk8cT5I3iy6SMXuFpk5mB6PL6XfC8PCwrPTx93udwKUm9HRteAlTGBLiA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
+
+  rrule-temporal@2.0.2:
+    resolution: {integrity: sha512-pwe7+pWXKUotQgdudN8W36tFHWf8eH+FbcB5Tl4Zftb4RYpl1hnqMRapizv0s8QlOlC6GEKcVSmITurpSOVZfQ==}
 
   safe-regex@2.1.1:
     resolution: {integrity: sha512-rx+x8AMzKb5Q5lQ95Zoi6ZbJqwCLkqi3XuJXp5P3rT8OEc6sZCJG5AE5dU3lsgRr/F4Bs31jSlVN+j5KrsGu9A==}
@@ -1319,6 +1328,10 @@ snapshots:
       '@rolldown/binding-wasm32-wasi': 1.1.5
       '@rolldown/binding-win32-arm64-msvc': 1.1.5
       '@rolldown/binding-win32-x64-msvc': 1.1.5
+
+  rrule-temporal@2.0.2:
+    dependencies:
+      temporal-spec: 1.0.1
 
   safe-regex@2.1.1:
     dependencies:

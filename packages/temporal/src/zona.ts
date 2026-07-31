@@ -60,6 +60,32 @@ export function instanteDe(
   return zonedDe(fecha, hora, zona).toInstant();
 }
 
+/**
+ * `UNTIL` (instante UTC) → **la última fecha civil que la regla puede producir**, inclusiva.
+ *
+ * Vive aquí y no en `expansion.ts` porque es una conversión con zona dentro, y la etapa 1 no
+ * tiene ninguna. ADR-018 §4 exige comparar `UNTIL` **como instante, nunca como fecha local**, y
+ * eso es exactamente lo que hace: no trunca el instante a su día civil —que dejaría entrar una
+ * ocurrencia posterior a `UNTIL` dentro del mismo día—, sino que compara el instante real de la
+ * ocurrencia candidata.
+ *
+ * La reducción a una fecha es **exacta, no una aproximación**: con la hora local fija, el
+ * instante de una ocurrencia es monótono creciente en su fecha, así que existe una última fecha
+ * `d*` y `instante(d) <= UNTIL` equivale a `d <= d*`. Y solo hay dos candidatas: el día civil de
+ * `UNTIL` en la zona, o el anterior — porque la ocurrencia del día siguiente arranca, como
+ * pronto, en la medianoche siguiente a `UNTIL`, que ya es posterior.
+ */
+export function fechaLimiteDeUntil(
+  until: Temporal.Instant,
+  horaLocal: Temporal.PlainTime,
+  zona: ZonaIana,
+): Temporal.PlainDate {
+  const candidata = until.toZonedDateTimeISO(zona).toPlainDate();
+  return Temporal.Instant.compare(instanteDe(candidata, horaLocal, zona), until) <= 0
+    ? candidata
+    : candidata.subtract({ days: 1 });
+}
+
 const MEDIANOCHE = Temporal.PlainTime.from("00:00");
 
 /**
