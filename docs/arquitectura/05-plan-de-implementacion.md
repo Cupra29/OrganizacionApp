@@ -335,6 +335,16 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
   (RFC 5545 §3.3.10).
 - `effective_until = 2026-08-17` (lunes) **incluye** la ocurrencia de ese mismo día; y cuando la
   regla trae además `UNTIL`, manda el más restrictivo de los dos, probado en las dos direcciones.
+- **`UNTIL` se reduce a fecha civil antes de entrar en la etapa 1, y la reducción es exacta.** Con
+  `UNTIL = 2026-08-17T14:00Z` y la ocurrencia de ese día a las 15:00Z, el límite es **`2026-08-16`**,
+  no `08-17`. Truncar `UNTIL` a su día civil admitiría una ocurrencia **posterior a `UNTIL`**, que
+  es el error que cualquiera comete. Segundo caso, con la otra trampa: el día civil de `UNTIL` se
+  calcula **en la zona de la regla, no en UTC** — con una zona lejana de UTC los dos difieren.
+- **El corpus del oráculo diferencial declara su dominio.** Dos divergencias de `rrule-temporal`
+  están fijadas **como esperadas**, no excluidas en silencio: acepta ancla no sincronizada (ADR-018
+  §6 la rechaza) y recorta en vez de omitir, arrastrando el día recortado (`MONTHLY` desde el 31 de
+  enero le da `01-31, 02-28, 03-28, 04-28`; a nosotros `01-31, 03-31, 05-31, 07-31`). Cada
+  exclusión lleva su motivo escrito y un test propio que fija **nuestra** respuesta.
 - Un cronotipo con pico 22:00–01:00 produce una franja `PEAK` contigua que atraviesa
   medianoche, sin partirse en dos. **Verificación mecánica**: el instante de la medianoche local
   no aparece en la estructura devuelta ni como frontera entre dos entradas del mismo `tier` ni
