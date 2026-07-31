@@ -178,6 +178,44 @@ fallo. El RFC decide esto, así que no es una elección nuestra.
   > demostrarla. Un ejemplo que no discrimina es un defecto real, del mismo tipo que el 4×3
   > insatisfacible, y por eso queda escrito en vez de sustituido en silencio.
 - **`UNTIL` se compara como instante**, nunca como fecha local.
+
+  > **Nota fechada (2026-07-30) — de quién es `UNTIL`, que este ADR no decía.** Al entregar la
+  > etapa 1 (`1dfb408`) apareció que este punto y el §1 se contradicen **en apariencia**: aquí se
+  > exige comparar `UNTIL` como instante, y allí se decide que la etapa 1 no tiene instantes ni
+  > zonas. Las dos son correctas; lo que faltaba era decir **dónde ocurre la reducción**.
+  >
+  > **La etapa 1 recibe siempre un límite de FECHA CIVIL, nunca un instante.** `UNTIL` se reduce a
+  > `d*` —la última fecha civil cuya ocurrencia no pasa de `UNTIL`— en el módulo de zonas, antes de
+  > entrar. `effective_until` ya es una fecha civil. La etapa 1 aplica `min(d*, effective_until)`,
+  > que es la intersección de este mismo punto expresada donde puede calcularse.
+  >
+  > **La reducción es exacta, no conservadora**, y esto no es un lujo: restar un día "por si acaso"
+  > perdería una ocurrencia legítima, y truncar `UNTIL` a su día civil **admitiría una ocurrencia
+  > posterior a `UNTIL`**. El caso que discrimina: `UNTIL = 2026-08-17T14:00Z` con la ocurrencia de
+  > ese día a las 15:00Z da `d* = 2026-08-16`. Truncar daría `08-17` y colaría la de las 15:00Z.
+  >
+  > **Por qué se puede hacer exacta con dos comprobaciones.** Con hora local fija, el mapa
+  > `fecha civil → instante` en una zona es **monótono no decreciente**: es una propiedad de las
+  > zonas horarias en sí —son funciones escalonadas monótonas de la línea de instantes— y la
+  > conserva la desambiguación `'compatible'`. Por tanto existe un umbral `d*` y
+  > `instante(d) ≤ UNTIL ⟺ d ≤ d*`. Los candidatos son solo dos, `d₀` y `d₀ − 1`, siendo `d₀` la
+  > fecha civil de `UNTIL`: `d₀ + 1` empieza después de que acabe el día de `UNTIL`, y `d₀ − 1`
+  > termina antes de que empiece.
+  >
+  > **Tres precisiones del argumento, verificadas el 2026-07-30:**
+  > 1. **`d₀` se calcula en la zona de la regla, no en UTC.** Es la segunda trampa de este párrafo,
+  >    al lado del truncado: para una zona lejana de UTC, el día civil de `UNTIL` en UTC y en la
+  >    zona de la regla son distintos.
+  > 2. La monotonía es **débil**, no estricta, y con eso basta: para que exista el umbral no hace
+  >    falta que dos fechas no puedan dar el mismo instante. Intentar demostrarla estricta falla en
+  >    zonas patológicas y no aporta nada.
+  > 3. Se sostiene incluso con **cambios de línea de cambio de fecha** (Samoa 2011, +25 h de un
+  >    salto): cuando el reloj avanza más de 24 h, la fecha civil intermedia **desaparece**, así que
+  >    el hueco entre dos fechas existentes crece a la par y la diferencia de instantes sigue siendo
+  >    positiva. No hay borde ahí.
+  >
+  > **No cambia ninguna decisión**: hace total el reparto entre las dos etapas, que estaba
+  > incompleto. Mismo mecanismo que la nota de `franjaQueContiene` en 03 §3.2.
 - **`effective_from` / `effective_until`** son columnas `date` sin zona, y ADR-003 prohíbe una
   fecha civil sin zona: se interpretan en `recurrence_rules.timezone`, que está en la misma fila.
   `effective_until` es **inclusiva hasta el fin de esa jornada civil en esa zona**. Cuando la
@@ -217,6 +255,30 @@ Así compramos los veinte años de parches del ecosistema donde su valor es máx
 implementación independiente con la que discrepar— y no donde su coste es máximo, dentro del
 camino de producción. No es una tautología en el sentido del límite nº 2 de `CLAUDE.md`: es
 precisamente lo contrario, dos implementaciones sin código compartido.
+
+> **Nota fechada (2026-07-31) — el oráculo tiene dominio de validez, y hay que declararlo.** Al
+> entregar la etapa 1 aparecieron dos puntos en los que `rrule-temporal` y nosotros **divergimos a
+> propósito**. En ellos el oráculo no es oráculo: si el test diferencial los incluye, falla donde
+> nosotros tenemos razón, y la salida barata sería "ajustar" nuestra implementación a la suya.
+> Quedan fijados por test **como divergencias esperadas**, no excluidos en silencio.
+>
+> 1. **Ancla no sincronizada.** Acepta en silencio un `DTSTART` que no pertenece al conjunto de la
+>    regla: con ancla en domingo y `BYDAY=MO`, arranca el lunes siguiente. Es exactamente lo que el
+>    §6 rechaza, y es **evidencia empírica de por qué**: el §6 se justificaba diciendo que RFC 5545
+>    solo dice *"should"* y que las bibliotecas no coinciden entre sí. Ahora hay una biblioteca real
+>    eligiendo una convención silenciosa donde nosotros exigimos rechazo explícito. La alternativa
+>    descartada —"una biblioteca nos daría una convención, no una respuesta"— deja de ser un
+>    argumento y pasa a ser una observación.
+> 2. **RFC 5545 §3.3.10.** Recorta en vez de omitir **y arrastra el día recortado para siempre**:
+>    `MONTHLY` desde el 31 de enero da `01-31, 02-28, 03-28, 04-28`. Nuestra regla del §3 es
+>    omitir, que es lo que dice el RFC, y da `01-31, 03-31, 05-31, 07-31`. La divergencia no es de
+>    un caso: a partir de febrero **todas** las ocurrencias difieren, porque el recorte es
+>    pegajoso. Un test diferencial que no acote esto reporta un fallo por mes.
+>
+> **Consecuencia operativa:** el corpus del test diferencial **excluye ancla no sincronizada y
+> `MONTHLY`/`YEARLY` con día de ancla > 28**, y cada exclusión lleva escrito su motivo y un test
+> propio que fija nuestra respuesta. Un oráculo sin dominio declarado se silencia entero la primera
+> vez que molesta, y entonces ya no protege nada.
 
 **9. El guardrail se extiende a las puertas que abre `Temporal`**, sin cambiar su alcance de
 paquetes: `Temporal.Now` (cualquier miembro) e
