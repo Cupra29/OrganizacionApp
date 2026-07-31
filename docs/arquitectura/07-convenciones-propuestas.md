@@ -297,8 +297,15 @@ horario se escribe con `America/Mexico_City` y **pasa en verde sin ejercitar nad
   | `America/Mexico_City` | Aritmética de medianoche **aislada** de DST | Sin transiciones: separa el bug de medianoche del bug de horario de verano, que son distintos |
   | `America/Chicago` | Jornadas de 23 h/25 h, turno que cruza la transición | Transiciones 2026 verificables a mano: **2026-03-08** (adelanto) y **2026-11-01** (atraso) |
   | `Europe/Madrid` | Horas locales inexistentes y ambiguas (02:30) | En la regla de la UE el hueco **y** el pliegue caen los dos en 02:00–02:59; en la de EE. UU. no. Transiciones 2026: **2026-03-29** y **2026-10-25** |
-  | `Australia/Lord_Howe` | Salto de **30 min** | Un motor que asuma que el DST siempre son 60 min pasa todo lo demás |
+  | `Australia/Lord_Howe` | Salto de **30 min** y **hemisferio sur** | Un motor que asuma que el DST siempre son 60 min pasa todo lo demás. Y su temporada va **al revés**: +11:00 de octubre a abril, +10:30 de abril a octubre |
   | `Asia/Kolkata` | Offset no entero (+05:30) | Nombrada en 03 §10.3 sin fixture propia |
+
+  **Un offset no es una propiedad de una zona: es una propiedad de una zona EN UNA FECHA.** Nunca
+  escribas "Lord Howe es +11" ni "el salto son 17 h" sin decir cuándo; escribe la fecha al lado del
+  número, siempre, también en prosa y en comentarios. Un valor plausible sin su condición sobrevive
+  a las revisiones —ya ha pasado tres veces en este proyecto— porque nadie duda de un número que
+  parece razonable. Cuando una fixture depende del salto entre dos zonas, **las dos temporadas van
+  a la suite**, no solo la que se escribió primero.
 
   **`America/Mexico_City` no sirve para ninguna fixture de cambio de horario**: México suprimió el
   horario de verano en 2022 y su tzdata no tiene transiciones futuras. Un test de "02:30 ambigua"

@@ -389,13 +389,30 @@ biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rru
 - Property test 3: `∀ jornada: vigilia >= 0 ∧ sueño >= 0`. Es el suelo, no el techo: lo
   interesante son las dos de arriba. Con el acotado de 03 §3.1 `sueño >= 0` es cierto **por
   construcción**, así que este test vigila el acotado, no la aritmética.
-- **Viaje transmeridiano hacia el este, con valores exactos.** `America/Mexico_City` →
-  `Europe/Madrid` con override que empieza en `d+1`, `wake 07:00`, `sleep 23:00`: la jornada de `d`
-  mide 16 h, `sueño = 0` y `recorteVigilia = 0`. Con `Australia/Lord_Howe` (salto de 17 h) la
-  jornada mide 7 h, `sueño = 0` y **`recorteVigilia = 540 min`** — los 9 h de vigilia declarada
-  que no cupieron. En los dos casos **el embaldosado se mantiene** y **ningún minuto pertenece a
-  dos jornadas**: es el criterio que importa, porque el síntoma visible (sueño negativo) escondía
-  un solape de capacidad.
+- **Viaje transmeridiano hacia el este, con valores exactos y con fecha.** Origen
+  `America/Mexico_City` (UTC−6 todo el año), `wake 07:00`, `sleep 23:00` — vigilia declarada 960
+  min — con override que empieza en `d+1`. **El salto depende de la fecha, así que cada fila lleva
+  la suya:**
+
+  | `d` | Destino | Offset destino | Salto | Jornada | `sueño` | `recorteVigilia` |
+  |---|---|---|---|---|---|---|
+  | 2026-08-03 | `Europe/Madrid` | +02:00 (CEST) | 8 h | 960 min | **0** | 0 |
+  | 2026-01-05 | `Europe/Madrid` | +01:00 (CET) | 7 h | 1020 min | **60** | 0 |
+  | 2026-08-03 | `Australia/Lord_Howe` | +10:30 (invierno austral) | 16,5 h | 450 min | 0 | **510** |
+  | 2026-01-05 | `Australia/Lord_Howe` | +11:00 (verano austral) | 17 h | 420 min | 0 | **540** |
+
+  En los cuatro casos **el embaldosado se mantiene** y **ningún minuto pertenece a dos jornadas**:
+  es el criterio que importa, porque el síntoma visible (sueño negativo) escondía un solape de
+  capacidad. Las dos filas de cada destino son la misma prueba en las dos temporadas y **las dos
+  van a la suite**: son lo que impide que alguien transcriba un solo número y lo dé por universal.
+
+  > **Corregido el 2026-07-30.** Este criterio daba un único valor por destino —`sueño = 0` para
+  > Madrid y `recorteVigilia = 540` para Lord Howe— **sin fecha**, y ninguno de los dos es
+  > universal: en enero Madrid está en CET y el sueño es 60, no 0; en agosto Lord Howe está en
+  > +10:30 y el recorte es 510, no 540. Lo detectó `engine-dev` al implementar, porque su fixture
+  > estaba fechada en agosto y no cuadraba con el número del documento — **y paró en vez de ajustar
+  > el número**, que es lo correcto y lo que evitó que el documento ganara la discusión contra la
+  > realidad.
 - **`recorteVigilia == 0` en toda jornada que no cruza un salto de huso.** Si es distinto de cero
   sin override de por medio, hay un bug en el acotado o en `zonaEfectivaEn`.
 - Hacia el **oeste** no hay recorte: la jornada se alarga, `sueño` crece y la vigilia no cambia.

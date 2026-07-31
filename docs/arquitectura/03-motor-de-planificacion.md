@@ -170,10 +170,19 @@ esparcido.
 > **Resuelto el 2026-07-30 el residuo transmeridiano, y no era un problema de reporte: era un
 > doble conteo de capacidad.** Al implementar la etapa 2 (`c718e06`) apareció con fixture delante
 > que `sleep < wakeSig` **es falsa**, y no por un bug: con un override hacia el **este** que empieza
-> en `d+1`, la jornada de `d` pierde tantos minutos como salte el offset. México → Madrid (8 h) con
-> sueño de 8 h da `sueño = 0`; México → Lord Howe (17 h) lo daba **negativo**. Los tres instantes
+> en `d+1`, la jornada de `d` pierde tantos minutos como salte el offset. México → Madrid **el
+> 2026-08-03** (8 h) con sueño de 8 h da `sueño = 0`; México → Lord Howe **el 2026-01-05** (17 h) lo
+> daba **negativo**. Los tres instantes
 > son correctos y el embaldosado se mantiene: la noche se comprime **de verdad**, porque volar al
 > este acorta el día.
+>
+> **Ningún salto de huso es un número fijo: es un número por fecha.** Los 17 h de arriba solo valen
+> en **verano austral** (octubre–abril), cuando Lord Howe está en +11:00; en agosto está en +10:30
+> y el salto son 16,5 h. Los 8 h de Madrid solo valen en **verano europeo**: en enero es CET y son
+> 7 h, con lo que el sueño no es 0 sino 60 min. Las cuatro combinaciones están tabuladas con su
+> fecha en el criterio de aceptación de la fase 1 del [05](../05-plan-de-implementacion.md), y las
+> cuatro van a la suite. **Nunca se escribe un offset ni un salto sin la fecha en la que se midió**;
+> es la tercera vez que un número plausible sin su condición sobrevive en varios documentos.
 >
 > **Lo que estaba roto no era el signo del sueño, sino la vigilia.** Con un salto de 17 h la
 > jornada dura 7 h y la vigilia declarada son 16 h: el intervalo `[wake, sleep)` —que es
