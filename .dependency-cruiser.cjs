@@ -104,6 +104,22 @@ module.exports = {
       from: { path: "^(packages|apps)/", pathNot: "^packages/temporal/src/temporal\\.ts$" },
       to: { path: "node_modules/temporal-polyfill/" },
     },
+    {
+      name: "el-oraculo-no-entra-en-produccion",
+      comment:
+        "ADR-018 §8: `rrule-temporal` es el ORÁCULO DIFERENCIAL de la expansión, no una " +
+        "implementación. La regla de arriba NO lo cubre: `doNotFollow` corta en node_modules, " +
+        "así que su import estático de `temporal-polyfill/full` no aparece en el grafo y una " +
+        "arista hacia él pasaría inadvertida — comprobado el 2026-07-30 sobre el grafo real. " +
+        "El daño sería el de siempre: DOS implementaciones de `Temporal` en el mismo proceso, " +
+        "cuyos objetos no interoperan por comprobación de ranura interna. Falla en ejecución y " +
+        "no al compilar. Se expresa como 'ningún archivo de producción depende de una " +
+        "devDependency' y no como 'nadie importa rrule-temporal' porque así cubre también a la " +
+        "siguiente biblioteca que entre de oráculo, que es exactamente el fallo que se repite.",
+      severity: "error",
+      from: { path: "^packages/[^/]+/src/", pathNot: "\\.test\\.ts$" },
+      to: { dependencyTypes: ["npm-dev"], dependencyTypesNot: ["type-only"] },
+    },
 
     // ---------- Dirección de las flechas (01 §6) ----------
     {
