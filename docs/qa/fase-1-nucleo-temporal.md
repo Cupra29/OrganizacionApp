@@ -7,6 +7,13 @@ documento, commit `c718e06` — 47 tests, 100 % de ramas. Apareció un segundo e
 un hallazgo sin resolver de `arquitecto` sobre la propiedad de embaldosado con viajes hacia el
 este (§3.1, T-3): se deja anotado, sin casos nuevos hasta que se decida.
 
+**Actualizado 2026-07-31**: T-8, T-9, T-10 y los rechazos del validador T-21–T-31 implementados
+y verificados, commit `1dfb408` — 196 tests, 100 % de ramas, tablas de fechas reproducidas
+literalmente. Aparecieron dos paréntesis explicativos incorrectos (T-8, T-9 — las tablas y
+conjuntos de fechas en sí estaban bien, la explicación de *por qué* no); corregidos en §3.4,
+con nota en el Hallazgo 1 como tercera y cuarta instancia del mismo patrón. Se añadió también
+el alcance real del oráculo diferencial (§3.4).
+
 Estado: escrito antes de que exista código de la fase 1 (solo el guardrail está entregado).
 Cubre: [`05-plan-de-implementacion.md`, fase 1](../arquitectura/05-plan-de-implementacion.md),
 [ADR-003](../arquitectura/adr/ADR-003-modelo-temporal-y-zonas-horarias.md),
@@ -32,6 +39,13 @@ que se añade donde corresponda, con fecha y commit.
 > correctas. Corregido con nota en §3.1, y referenciado desde el Hallazgo 1 como segunda
 > instancia del mismo patrón — dos casos con el mismo síntoma en el mismo documento son un
 > argumento más fuerte que uno solo.
+>
+> **Nota de corrección (2026-07-31).** Al implementar T-8–T-10 y T-21–T-31 aparecieron dos
+> paréntesis explicativos falsos — no en las tablas de fechas, que se reprodujeron literales,
+> sino en el razonamiento que las acompañaba. T-9 decía "rotación" donde era un desplazamiento
+> con reparto distinto (`[4,4,4,4,3,3,3,3]`, no constante); T-8 describía una discrepancia
+> concreta (incluir el 3-ago y excluir el 7-ago) que ninguna implementación plausible produce.
+> Corregidas en §3.4, con nota en el Hallazgo 1 como tercera y cuarta instancia.
 
 ---
 
@@ -130,18 +144,24 @@ uno vacío.
 > revisado en §3.1.
 >
 > **Esta corrección deja además la mejor evidencia posible a favor del propio Hallazgo 1,
-> dentro de este mismo documento — y no una vez, sino dos.** Al aplicar el fixture del Caso
+> dentro de este mismo documento — y no una vez, sino cuatro.** Al aplicar el fixture del Caso
 > T-4 con el pseudocódigo corregido, se detectó que T-4 tenía un error aritmético de 30
 > minutos: `sueño` y `vigilia` estaban mal individualmente, pero su suma (`sueño + vigilia =
 > 1380 min`) daba el resultado correcto de todos modos. **Al implementar T-2 (2026-07-30)
 > apareció el mismo patrón por segunda vez**: la cadena ISO de `sleep` tenía la fecha civil
 > equivocada (un día de menos), pero las duraciones `vigilia = 990 min` y `sueño = 450 min`
-> eran correctas de todos modos, porque ambas se derivan por resta contra el mismo par de
-> instantes mal fechados de forma consistente. Dos instancias del mismo patrón, en el mismo
-> documento, con la misma causa raíz (una identidad de suma que no depende de que los
-> instantes sean los correctos): es exactamente el defecto que la identidad tautológica no
-> puede detectar, aparecido de forma real y no hipotética. Ver las notas de corrección en T-2
-> y T-4 (§3.1 y §3.2).
+> eran correctas de todos modos. **Al implementar T-8 y T-9 (2026-07-31) apareció una tercera
+> y una cuarta vez, en una variante distinta del mismo patrón**: esta vez el dato principal
+> —el conjunto de fechas y la tabla de ocho semanas— era exactamente correcto, y lo que estaba
+> mal era el **paréntesis que explicaba por qué**. T-9 llamaba "rotación" a un desplazamiento
+> que en realidad cambia el número de días de trabajo por semana (`[4,4,4,4,3,3,3,3]`, no
+> constante — una rotación de verdad conserva el conteo). T-8 describía una discrepancia
+> concreta entre implementaciones (incluir el 3-ago, excluir el 7-ago) que ninguna
+> implementación plausible produce en realidad. **Cuatro instancias del mismo patrón en el
+> mismo documento —el dato principal correcto, la cifra derivada o la explicación mal— dicen
+> algo sobre cómo se escriben estos casos, no sobre despistes sueltos**: es fácil verificar el
+> resultado final (la tabla, el conjunto, el total) y no recalcular la justificación que lo
+> acompaña. Ver las notas de corrección en T-2, T-4, T-8 y T-9.
 
 ### Hallazgo 2 — "`FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR` anclada en miércoles" **no es
 verificable como está escrito**
@@ -311,10 +331,10 @@ oficial adoptada en `docs/arquitectura`, sustituye a la tautológica del Hallazg
   en cuanto hay un `timezone_override` que cambia de zona exactamente ahí, dejan de coincidir y
   la propiedad lo detecta. La identidad `sueño + vigilia == nextWake − wake` de la versión
   original **no** lo habría detectado nunca, porque es verdadera para cualquier trío de
-  instantes sin importar si están bien calculados — ver las notas de T-2 y T-4 para dos
-  instancias reales de ese mismo tipo de problema (ahí por constantes/fechas mal derivadas, no
-  por una zona, pero con idéntico síntoma: el total o la duración correctos esconden un
-  componente incorrecto).
+  instantes sin importar si están bien calculados — ver las notas de T-2, T-4, T-8 y T-9 para
+  cuatro instancias reales de ese mismo tipo de problema (por constantes, fechas o
+  explicaciones mal derivadas, no por una zona, pero con idéntico síntoma: el dato principal
+  correcto esconde un componente o una justificación incorrectos).
 - **Nivel**: property-based (ver nota de técnica abajo). **Automatizar**: sí, prioridad
   máxima — es ahora la propiedad oficial del criterio de aceptación corregido.
 - **Implementado (2026-07-30, `c718e06`)**, con dos notas:
@@ -500,16 +520,68 @@ conjunto exacto (cierra el Hallazgo 2)
   - Total acumulado: 2 + 3 + 3 = **8**, que es `COUNT`. El conjunto se corta exactamente ahí.
   - **Conjunto esperado, en orden**: `2026-08-05, 2026-08-07, 2026-08-17, 2026-08-19,
     2026-08-21, 2026-08-31, 2026-09-02, 2026-09-04`.
-- **Los dos errores clásicos que este caso detecta** (ADR-018 §5): (a) sumar `INTERVAL × 7`
-  días a cada ocurrencia individual en vez de anclar por bloques de semana — produciría un
-  conjunto distinto (una implementación de ese tipo, partiendo de la secuencia semanal simple
-  y tomando "una de cada dos" en la lista plana, incluiría el 3-ago y excluiría el 7-ago,
-  entre otras discrepancias); (b) contar `COUNT` sobre el conjunto sin fusionar
-  cronológicamente antes de cortar.
+- **Los dos errores clásicos que este caso detecta** (ADR-018 §5): **(a) anclar por
+  ocurrencia individual en vez de por bloques de semana.** La forma que ADR-018 §5 nombra
+  literalmente — sumar `INTERVAL × 7` días a cada ocurrencia en vez de agrupar por semana —
+  produce un conjunto que **no contiene ningún lunes en ningún momento**: el candidato natural
+  para el primer lunes, 2026-08-03, precede al ancla (miércoles 2026-08-05) y se descarta; y
+  como la cadena de lunes se construye sumando 14 días **a partir de una ocurrencia ya
+  descartada**, ningún lunes posterior se recupera nunca. A ese conjunto **se le escapa el
+  2026-08-17**, que sí pertenece al conjunto correcto (semana 2, activa). **(b) contar
+  `COUNT` sobre el conjunto sin fusionar cronológicamente antes de cortar.**
 - **Verificación cruzada obligatoria**: comparar contra `rrule-temporal@2.0.2` como oráculo
-  diferencial (ADR-018 punto 8), no solo contra este cálculo manual.
+  diferencial (ADR-018 punto 8), no solo contra este cálculo manual — con el alcance exacto
+  descrito en la nota de alcance del oráculo, más abajo.
 - **Nivel**: unitario determinista (con oráculo diferencial). **Automatizar**: sí, prioridad
   máxima.
+- **Implementado (2026-07-31, `1dfb408`)**: el conjunto de fechas se reprodujo literal. Ver
+  nota de corrección abajo sobre el paréntesis (a).
+
+> **Nota de corrección (2026-07-31).** La primera versión de este caso decía, para el error
+> (a): *"una implementación de ese tipo, partiendo de la secuencia semanal simple y tomando
+> 'una de cada dos' en la lista plana, incluiría el 3-ago y excluiría el 7-ago, entre otras
+> discrepancias"*. **Ese paréntesis no corresponde a ninguna implementación concreta**,
+> verificado al implementar el caso:
+> - Tomar "una ocurrencia de cada dos" de la lista plana semanal simple **desde el lunes de la
+>   semana del ancla** incluye **los dos** (3-ago y 7-ago), no incluye uno y excluye el otro.
+> - Hacerlo **desde el propio ancla** los excluye **a los dos**.
+> - La forma que ADR-018 §5 nombra literalmente — sumar `INTERVAL × 7` a cada ocurrencia — es
+>   la que sí diverge del conjunto correcto, pero no en el par (3-ago, 7-ago): pierde **todos**
+>   los lunes, incluido específicamente el 2026-08-17, según se explica en el cuerpo del caso
+>   arriba.
+>
+> **La conclusión del caso se sostiene** — existen implementaciones plausibles que fallan y el
+> caso las distingue del conjunto correcto — pero el detalle de qué fechas concretas difieren
+> estaba inventado. Corregido sustituyéndolo por la implementación equivocada real (sumar
+> `INTERVAL × 7` por ocurrencia) y su divergencia real (ningún lunes, incluido el 17-ago). Es
+> la tercera instancia del patrón del Hallazgo 1: el conjunto principal (las ocho fechas) era
+> correcto; el paréntesis que lo explicaba, no.
+
+> **Nota sobre el alcance real del oráculo diferencial (2026-07-31, tras la implementación).**
+> `rrule-temporal@2.0.2` cubre, verificado en `1dfb408`: las cuatro `FREQ`, `INTERVAL` de 1 a
+> 40, `BYDAY` de 1 a 7 días, `COUNT` cortando tanto en el borde de una semana activa como a
+> mitad de semana, y `WKST=MO` con el ancla cayendo en domingo (el caso límite de "semana del
+> ancla" cuando el ancla es el último día de la semana civil).
+>
+> **No cubre `CYCLE`** — ninguna biblioteca del ecosistema expresa turnos rotativos, así que no
+> hay nada con qué diferenciar; el falsificador de `CYCLE` es el propio periodo del ciclo (ver
+> T-9, la novena semana repitiendo la primera), no un oráculo externo. **Tampoco cubre el
+> validador de rechazos** (T-21–T-31): el oráculo acepta un superconjunto de RFC 5545 mucho más
+> amplio que nuestro subconjunto, así que nunca ayuda a decidir qué **rechazar** — eso hay que
+> escribirlo y probarlo sin ayuda externa, exactamente como ya decía ADR-018 alternativa
+> "`rrule-temporal` en producción", punto (b).
+>
+> **Dos divergencias del oráculo quedaron fijadas por test, a propósito, no por error nuestro**:
+> `rrule-temporal` incumple RFC 5545 §3.3.10 en `MONTHLY`/`YEARLY` con día de ancla inexistente
+> — **recorta** al último día del mes en vez de **omitir** la ocurrencia, y además **arrastra
+> el día recortado** a las ocurrencias siguientes en vez de recalcular desde el día de ancla
+> original en cada mes. Y acepta un `DTSTART` no sincronizado con la regla (lo que ADR-018
+> punto 6 exige rechazar en nuestro validador). Ninguna de las dos es un fallo del oráculo que
+> haya que reportar — son precisamente el tipo de discrepancia documentada por la que se eligió
+> un oráculo *diferencial* y no una biblioteca de producción (ADR-018, alternativa
+> `rrule-temporal` en producción, contra (b)): cuando el oráculo y el RFC no coinciden, gana el
+> RFC, nunca el oráculo, y aquí quedó registrado con un test que lo fija en vez de dejarlo como
+> sorpresa la próxima vez que alguien corra la comparación.
 
 #### Caso T-9 — `CYCLE` de 8 días desalineado, el mismo fixture representativo del criterio
 de la fase, con las 8 semanas escritas explícitamente
@@ -534,12 +606,29 @@ de la fase, con las 8 semanas escritas explícitamente
   | 8 (21–27 sep) | W W W R R R R |
   | 9 (28 sep–04 oct) | W W W W R R R — **idéntica a la semana 1** |
 
-  Las ocho primeras son mutuamente distintas (cada una es la rotación de la anterior un
-  puesto a la izquierda) y la novena repite exactamente la primera, que es el falsificador que
-  el propio criterio de la fase exige.
+  La novena repite exactamente la primera, que es el falsificador que el propio criterio de la
+  fase exige. **La relación entre semanas consecutivas es un desplazamiento a la derecha, no
+  una rotación** (ver nota de corrección abajo): `semana[s+1][d] == semana[s][d−1]` para
+  `d` = martes…domingo, con un valor **nuevo** entrando cada semana por el lunes. El reparto
+  de días de trabajo por semana es `[4,4,4,4,3,3,3,3]` — no es constante, así que no puede ser
+  una rotación (una rotación conserva el número de elementos "activos").
 - **Nivel**: unitario determinista (con oráculo diferencial para el conjunto de fechas
-  subyacente). **Automatizar**: sí, prioridad máxima — es el criterio textual de la fase,
-  con la tabla completa en vez de la afirmación sin cifras.
+  subyacente — ver nota de alcance en T-8: `CYCLE` queda fuera de ese oráculo). **Automatizar**:
+  sí, prioridad máxima — es el criterio textual de la fase, con la tabla completa en vez de la
+  afirmación sin cifras.
+- **Implementado (2026-07-31, `1dfb408`)**: la tabla de ocho semanas se reprodujo literal. Ver
+  nota de corrección abajo sobre la explicación de la relación entre semanas.
+
+> **Nota de corrección (2026-07-31).** La primera versión de este caso decía *"cada una es la
+> rotación de la anterior un puesto a la izquierda"*. **Es falso**: una rotación conserva el
+> número de elementos, y aquí las semanas 1–4 tienen 4 días de trabajo mientras que las 5–8
+> tienen 3 — el reparto real es `[4,4,4,4,3,3,3,3]`, no constante. La relación verdadera es un
+> **desplazamiento a la derecha** con un valor nuevo entrando por el lunes:
+> `semana[s+1][d] == semana[s][d−1]`. La razón de fondo: avanzar 7 días dentro de un ciclo de
+> 8 **retrocede una fase** (7 = 8 − 1), así que cada semana civil "ve" el patrón un día más
+> tarde que la anterior, no rotado. **La tabla de ocho semanas en sí es correcta y la
+> implementación la reproduce literal** — corregida solo la frase que explicaba por qué,
+> cuarta instancia del patrón del Hallazgo 1 (ver ahí).
 
 #### Caso T-10 — `FREQ=MONTHLY` con día de ancla inexistente en algunos meses (omitir, no
 recortar)
@@ -556,6 +645,10 @@ recortar)
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad alta — cierra un punto
   que el criterio de la fase menciona en la entrega (implícito en ADR-018 §3) pero no en
   ningún bullet de aceptación (ver "qué falta", ítem 6).
+- **Implementado (2026-07-31, `1dfb408`)**: confirmado tal cual — este es también el caso que
+  fija por test la divergencia intencional del oráculo (ver nota en T-8): `rrule-temporal`
+  recortaría al último día del mes y arrastraría el recorte en vez de omitir cada mes por
+  separado, así que aquí se compara contra el RFC, no contra el oráculo.
 
 > **Nota de corrección (2026-07-29).** La primera versión de este caso decía "Febrero y abril
 > se omiten", dejando fuera junio (30 días, tampoco tiene día 31). El conjunto esperado en sí
@@ -814,6 +907,8 @@ ningún bullet de aceptación. Casos T-21 a T-29, uno por propiedad, mismo forma
 - **Nivel**: unitario determinista, todos. **Automatizar**: sí, prioridad alta el conjunto
   completo — T-24, T-27 y T-28 son los que el criterio actual no cubre y que más fácilmente
   se olvidan porque no están en ningún bullet existente.
+- **Implementado (2026-07-31, `1dfb408`)**: T-21 a T-29 confirmados tal cual, sin
+  correcciones.
 
 #### Caso T-30 — límites de `INTERVAL`
 
@@ -821,6 +916,7 @@ ningún bullet de aceptación. Casos T-21 a T-29, uno por propiedad, mismo forma
 - **Resultado esperado**: los tres primeros se rechazan (el ADR exige "entero ≥ 1"); el
   ausente se acepta con valor implícito 1.
 - **Nivel**: unitario determinista. **Automatizar**: sí.
+- **Implementado (2026-07-31, `1dfb408`)**: confirmado tal cual.
 
 #### Caso T-31 — el ancla debe pertenecer al conjunto que la regla genera (ADR-018 punto 6)
 
@@ -833,6 +929,10 @@ ningún bullet de aceptación. Casos T-21 a T-29, uno por propiedad, mismo forma
 - **Nivel**: unitario determinista. **Automatizar**: sí, prioridad alta — sin este caso, el
   punto 6 de ADR-018 (que existe explícitamente para eliminar la ambigüedad del `DTSTART` no
   sincronizado) no tiene ninguna prueba.
+- **Implementado (2026-07-31, `1dfb408`)**: confirmado tal cual. Nota: esta es la propiedad
+  que el oráculo diferencial **no** verifica por sí solo — `rrule-temporal` acepta un
+  `DTSTART` no sincronizado (ver nota de alcance del oráculo en T-8), así que este rechazo se
+  prueba contra el propio validador, no por contraste.
 
 ---
 
@@ -907,11 +1007,14 @@ que un ADR trata como decisión central.
 5. **La lista de rechazos del validador cubre 5 de las ~11 formas de ADR-018 §3.** Faltan
    `BYYEARDAY`, `BYWEEKNO`, `BYHOUR`, `RSCALE`, `COUNT`+`UNTIL` juntos, `UNTIL` como fecha
    civil sin zona, y `BYDAY` con `YEARLY` (solo se cubre con `MONTHLY`). Propuesto en §3.9.
+   **Implementado 2026-07-31, `1dfb408`** (T-21–T-29, incluidas las formas nuevas de este
+   ítem).
 6. **La regla de "omitir, no recortar" para `MONTHLY`/`YEARLY` con día de ancla inexistente
    (31 de febrero, 29 de febrero en año común) está en ADR-018 §3 pero en ningún bullet de
-   aceptación.** Propuesto en §3.4 (T-10).
+   aceptación.** Propuesto en §3.4 (T-10). **Implementado 2026-07-31, `1dfb408`.**
 7. **La validación de que `anchor_date` pertenece al conjunto que la regla genera (ADR-018
-   punto 6) no tiene caso propio.** Propuesto en §3.9 (T-31).
+   punto 6) no tiene caso propio.** Propuesto en §3.9 (T-31). **Implementado 2026-07-31,
+   `1dfb408`.**
 8. **La intersección de `effective_until` y `UNTIL`, y la inclusividad de `effective_until`,
    están en ADR-018 §4 pero sin caso de aceptación.** Propuesto en §3.10 (T-32, T-33).
 9. **Que `week_starts_on` nunca alcance al expansor no se verifica en ningún caso**, pese a
@@ -941,19 +1044,19 @@ que un ADR trata como decisión central.
     documento de QA todavía; no son de esta fase (viven en `packages/engine`, fases 3–4), así
     que no se proponen aquí, pero quedan anotados para que quien escriba el QA de esa fase no
     los redescubra desde cero.
-13. **Nuevo (2026-07-30). Qué significa un `sueño` de duración cero o negativa con un
-    `timezone_override` hacia el este no está decidido**, y `arquitecto` lo está mirando ahora
-    (descubierto al implementar T-3): México→Madrid con necesidad de sueño de 8 h da
-    `sueñoMinutes === 0`; México→Lord Howe lo da negativo. El embaldosado se mantiene y no es
-    un bug — es que cruzar husos hacia el este comprime la noche medida en instantes
-    absolutos. **Sin casos propuestos todavía, a propósito**: este documento espera la
-    decisión de `arquitecto` sobre qué significa (¿se trunca a cero? ¿es una forma nueva de
-    `INFEASIBLE`? ¿un `Finding` distinto de `SLEEP_DEBT`, con causa geográfica y no de
-    elección?) antes de escribir T-3x. Cuando se decida, como mínimo hacen falta dos casos:
-    México→Madrid como el límite exacto (`sueñoMinutes == 0`) y México→Lord Howe como el caso
-    que fuerza la decisión (`sueñoMinutes < 0`). Prioridad alta en cuanto se resuelva — hasta
-    entonces, no se puede escribir un resultado esperado sin inventar la decisión de
-    arquitectura que le corresponde a `arquitecto`.
+13. **Qué significa un `sueño` de duración cero o negativa con un `timezone_override` hacia
+    el este no está decidido**, y `arquitecto` lo está mirando (descubierto al implementar
+    T-3, 2026-07-30): México→Madrid con necesidad de sueño de 8 h da `sueñoMinutes === 0`;
+    México→Lord Howe lo da negativo. El embaldosado se mantiene y no es un bug — es que
+    cruzar husos hacia el este comprime la noche medida en instantes absolutos. **Sin casos
+    propuestos todavía, a propósito**: este documento espera la decisión de `arquitecto` sobre
+    qué significa (¿se trunca a cero? ¿es una forma nueva de `INFEASIBLE`? ¿un `Finding`
+    distinto de `SLEEP_DEBT`, con causa geográfica y no de elección?) antes de escribir T-3x.
+    Cuando se decida, como mínimo hacen falta dos casos: México→Madrid como el límite exacto
+    (`sueñoMinutes == 0`) y México→Lord Howe como el caso que fuerza la decisión
+    (`sueñoMinutes < 0`). Prioridad alta en cuanto se resuelva — hasta entonces, no se puede
+    escribir un resultado esperado sin inventar la decisión de arquitectura que le corresponde
+    a `arquitecto`.
 
 ---
 
@@ -963,21 +1066,21 @@ que un ADR trata como decisión central.
 |---|---|---|---|---|
 | `PlanningDay` y sueño | T-1, T-2 (alta); T-3 (máxima, propiedad oficial) | Unitario + exhaustivo por rejilla | Alta / máxima | ✅ T-1, T-2 implementados (`c718e06`); T-3 implementada salvo la mitad estricta bajo revisión (ver §3.1) |
 | Jornadas y DST | T-4, T-5, T-6 | Unitario | Máxima | ✅ implementados (`c718e06`) |
-| Álgebra de intervalos | T-7.1–T-7.5 | Unitario | Máxima (T-7.1, T-7.4), alta (resto) | Sin implementar aún (fuera de este lote) |
-| Expansión etapa 1 | T-8, T-9, T-10 | Unitario + oráculo diferencial | Máxima | Sin implementar aún (fuera de este lote) |
+| Álgebra de intervalos | T-7.1–T-7.5 | Unitario | Máxima (T-7.1, T-7.4), alta (resto) | Sin implementar aún |
+| Expansión etapa 1 | T-8, T-9, T-10 | Unitario + oráculo diferencial (`CYCLE` fuera de su alcance) | Máxima | ✅ implementados (`1dfb408`) |
 | Expansión etapa 2 | T-11, T-12 | Unitario | Máxima (T-11), opcional (T-12) | ✅ implementados (`c718e06`) |
-| Excepciones ancladas | T-13, T-14, T-15 | Unitario | Alta | Sin implementar aún (fuera de este lote) |
+| Excepciones ancladas | T-13, T-14, T-15 | Unitario | Alta | Sin implementar aún |
 | Zona / `anchor` | T-16–T-19 | Unitario + exhaustivo por rejilla | Alta | ✅ implementados (`c718e06`) |
-| Cronotipo 22–01 | T-20, T-20.1 | Unitario | Máxima (T-20, ya resuelto sin pendientes); media (T-20.1) | Sin implementar aún (fuera de este lote) |
-| Validador — rechazos | T-21–T-31 | Unitario | Alta | Sin implementar aún (fuera de este lote) |
-| `effective_*` / `UNTIL` | T-32, T-33 | Unitario | Alta | Sin implementar aún (fuera de este lote) |
-| `WKST` / `week_starts_on` | T-34 | Unitario | Alta | Sin implementar aún (fuera de este lote) |
+| Cronotipo 22–01 | T-20, T-20.1 | Unitario | Máxima (T-20, ya resuelto sin pendientes); media (T-20.1) | Sin implementar aún |
+| Validador — rechazos | T-21–T-31 | Unitario (oráculo no aplica al rechazo, ver nota T-8) | Alta | ✅ implementados (`1dfb408`) |
+| `effective_*` / `UNTIL` | T-32, T-33 | Unitario | Alta | Sin implementar aún |
+| `WKST` / `week_starts_on` | T-34 | Unitario | Alta | Sin implementar aún |
 | Guardrail `Temporal.Now` | ver documento separado | Integración de configuración | Alta | ✅ implementado (`eaf92f2`) |
 
 **Fuera de alcance de este documento**: Testcontainers y e2e no aplican — `packages/temporal`
 no tiene I/O. Cobertura de ramas ≥95 % (ya en el criterio del plan) se verifica con el
-`vitest.config.ts` raíz — el lote implementado en `c718e06` reporta 100 % de ramas sobre los
-47 tests que cubre, no es un caso de este documento en sí.
+`vitest.config.ts` raíz — los lotes implementados reportan 100 % de ramas (47 tests en
+`c718e06`, 196 en `1dfb408`), no es un caso de este documento en sí.
 
 ---
 
@@ -986,3 +1089,4 @@ no tiene I/O. Cobertura de ramas ≥95 % (ya en el criterio del plan) se verific
 | Fecha | Quién / commit | Casos ejecutados | Resultado | Hallazgos |
 |---|---|---|---|---|
 | 2026-07-30 | `engine-dev`, commit `c718e06` | T-1, T-2, T-4, T-5, T-6 (dos lecturas), T-11, T-12, T-16, T-17, T-18, T-19 | 47 tests, 100 % de ramas. Todos los valores exactos confirmados tras la corrección de T-2 | Segundo error de fecha de la misma familia que T-4, esta vez en T-2 (cadena ISO con un día de menos; duraciones correctas) — corregido, ver Hallazgo 1 y nota en T-2. T-3/T-19 implementados con técnica distinta a la propuesta (rejilla exhaustiva de 9000+ jornadas en vez de `fast-check`), aceptado sin cambiar la exigencia de casos. Hallazgo sin resolver de `arquitecto`: la mitad estricta de T-3 (`sleep < wakeSig`) es falsa con viajes hacia el este suficientemente grandes (México→Madrid da 0, México→Lord Howe da negativo); casos nuevos pendientes de esa decisión (ver "qué falta", ítem 13) |
+| 2026-07-31 | `engine-dev`, commit `1dfb408` | T-8, T-9, T-10, T-21–T-31 | 196 tests, 100 % de ramas. Tablas de fechas y conjuntos reproducidos literalmente | Dos paréntesis explicativos falsos, tercera y cuarta instancia del patrón del Hallazgo 1: T-9 llamaba "rotación" a un desplazamiento con reparto no constante (`[4,4,4,4,3,3,3,3]`); T-8 describía una discrepancia concreta (3-ago incluido / 7-ago excluido) que ninguna implementación plausible produce — sustituida por la divergencia real de la forma que ADR-018 §5 nombra (ningún lunes, incluido el 17-ago). Ambos corregidos sin tocar las tablas/conjuntos, que eran correctos. Documentado el alcance real del oráculo diferencial: cubre las 4 `FREQ`, `INTERVAL` 1–40, `BYDAY` 1–7 días, `COUNT` en borde y a mitad de semana, `WKST=MO` con ancla en domingo; no cubre `CYCLE` ni el validador de rechazos; dos divergencias del oráculo (recorte con arrastre en vez de omisión RFC 5545 §3.3.10, y aceptación de `DTSTART` no sincronizado) fijadas por test a propósito |
