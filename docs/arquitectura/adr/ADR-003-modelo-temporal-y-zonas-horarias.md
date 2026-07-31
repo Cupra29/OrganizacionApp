@@ -37,8 +37,9 @@ El sueño de la jornada es `nextWakeAt − sleepAt`; la vigilia es `sleepAt − 
 > **Nota fechada (2026-07-30): la fórmula necesita un acotado, y ninguna decisión cambia.** Al
 > implementar la fase 1 apareció que `sleepAt` puede caer **después** de `nextWakeAt`: `sleepAt` es
 > una hora local de la zona del día `d` y `nextWakeAt` puede estar en otra zona, así que un viaje
-> hacia el este comprime la jornada. México → Lord Howe son 17 h de salto: la jornada dura 7 h y la
-> vigilia declarada 16. Tal cual, `sueño` salía **negativo** — pero el daño real era otro: el
+> hacia el este comprime la jornada. México → Lord Howe **el 2026-01-05** son 17 h de salto —en
+> agosto son 16,5, porque el horario de verano austral va de octubre a abril—: la jornada dura 7 h y
+> la vigilia declarada 16. Tal cual, `sueño` salía **negativo** — pero el daño real era otro: el
 > intervalo de vigilia se salía de la jornada e **invadía la siguiente**, así que la capacidad de
 > esos minutos se contaba dos veces.
 >
