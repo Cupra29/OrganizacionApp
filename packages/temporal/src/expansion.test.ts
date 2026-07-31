@@ -300,6 +300,44 @@ describe("T-32 y T-33 — `effective_until`, `UNTIL` y su intersección (ADR-018
     );
   });
 
+  it("`fechaLimiteDeUntil` calcula el día del `UNTIL` en la ZONA DE LA REGLA, no en UTC", () => {
+    // La segunda trampa del mismo párrafo de ADR-018 §4, al lado de la del truncado. `UNTIL` es
+    // un instante UTC y su día civil en UTC no es el de la zona de la regla salvo cerca de
+    // Greenwich: el test de arriba usa `America/Mexico_City` y ahí los dos días coinciden, así
+    // que un `until.toZonedDateTimeISO("UTC").toPlainDate()` pasaría sin enterarse.
+    //
+    // `Australia/Lord_Howe` los separa: a las 09:00 locales, el instante cae en el día civil
+    // ANTERIOR en UTC. Y como el offset es propiedad de una zona EN UNA FECHA, van las dos
+    // temporadas: +10:30 en agosto (estándar) y +11:00 en diciembre (verano austral).
+    //
+    // Por qué falla la versión en UTC y no se salva con la corrección de ±1 día: esa corrección
+    // solo RESTA. Con la zona al este, el día en UTC va por detrás del correcto y no hay forma de
+    // volver hacia delante — devuelve un límite un día corto y se pierde la última ocurrencia.
+    const enAgosto = Temporal.Instant.from("2026-08-16T22:30:00Z"); // 09:00 LHST (+10:30) del 17
+    expect(fechaLimiteDeUntil(enAgosto, T("09:00"), ZONA.DST_MEDIA_HORA).toString()).toBe(
+      "2026-08-17",
+    );
+    const enDiciembre = Temporal.Instant.from("2026-12-13T22:00:00Z"); // 09:00 LHDT (+11) del 14
+    expect(fechaLimiteDeUntil(enDiciembre, T("09:00"), ZONA.DST_MEDIA_HORA).toString()).toBe(
+      "2026-12-14",
+    );
+    // El día civil en UTC de esos dos instantes, que es lo que devolvería la versión equivocada.
+    expect(enAgosto.toZonedDateTimeISO("UTC").toPlainDate().toString()).toBe("2026-08-16");
+    expect(enDiciembre.toZonedDateTimeISO("UTC").toPlainDate().toString()).toBe("2026-12-13");
+  });
+
+  it("hacia el OESTE el mismo error no se ve, y por eso el caso de arriba va al este", () => {
+    // Control negativo, en la línea de la Lectura A de T-6: con una zona al oeste el día en UTC
+    // va por DELANTE del correcto, y la corrección de ±1 día —que solo resta— lo devuelve al
+    // valor bueno. Las dos implementaciones coinciden y el caso no discrimina nada. Queda escrito
+    // para que nadie sustituya la fixture de Lord Howe por una de Chicago creyendo que da igual.
+    const tardeEnChicago = Temporal.Instant.from("2026-08-18T02:00:00Z"); // 21:00 CDT del 17
+    expect(tardeEnChicago.toZonedDateTimeISO("UTC").toPlainDate().toString()).toBe("2026-08-18");
+    expect(fechaLimiteDeUntil(tardeEnChicago, T("09:00"), ZONA.DST_EEUU).toString()).toBe(
+      "2026-08-17",
+    );
+  });
+
   it("T-33 — manda `UNTIL` cuando es el más restrictivo", () => {
     const porUntil = fechaLimiteDeUntil(
       Temporal.Instant.from("2026-08-17T15:00:00Z"),
