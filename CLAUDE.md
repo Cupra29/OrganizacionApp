@@ -32,13 +32,14 @@ improvises ni lo sustituyas por otro. Si crees que falta uno, dilo.
 
 | Comando | Qué hace |
 |---|---|
-| `pnpm verify` | La puerta: `typecheck` + `lint` + `test` + `depcruise` + `depcruise:cobertura`. Pasa antes de cualquier commit |
+| `pnpm verify` | La puerta: `typecheck` + `lint` + `test` + `depcruise` + `depcruise:cobertura` + `guardrail:cobertura`. Pasa antes de cualquier commit |
 | `pnpm typecheck` | `tsc` en cada paquete, sin cortar en el primer fallo |
 | `pnpm lint` / `pnpm format` | Biome. `format` escribe los cambios |
 | `pnpm test` | Vitest sobre todos los proyectos |
 | `pnpm test:engine` | Solo `@oa/engine`. Rápido, sin base de datos |
 | `pnpm depcruise` | Grafo de dependencias: **¿hay aristas prohibidas?** |
 | `pnpm depcruise:cobertura` | **¿El análisis está mirando lo que debe?** Falla si un paquete desaparece del grafo — un ruleset que no ve nada pasaría en verde sin esto |
+| `pnpm guardrail:cobertura` | **¿El guardrail de reloj sigue viendo los paquetes que dice?** Inyecta un canario y exige que señale **todas** las formas prohibidas y **ninguna** legítima. Un `overrides` que deja de casar sale en verde sin esto |
 
 Llegan en su fase y **no antes**: `test:integration` y `db:generate`/`db:migrate` (fase 2),
 `test:golden` (fase 3), `dev` (fase 6).
@@ -48,7 +49,7 @@ Llegan en su fase y **no antes**: `test:integration` y `db:generate`/`db:migrate
 Todas las versiones viven en el `catalog:` de `pnpm-workspace.yaml`. No las cambies sin decirlo.
 
 Node **24** · pnpm **11.17.0** · TypeScript **6.0.x** · Vitest **4** · Biome **2.5.6** ·
-dependency-cruiser **18**
+dependency-cruiser **18** · temporal-polyfill **1.0.2** · rrule-temporal **2.0.2** (solo dev)
 
 - **No instales `typescript@latest`.** Hoy resuelve a 7.x, que no publica API programática y
   con el que `dependency-cruiser` no funciona: se perdería la frontera del motor entera. Ver
@@ -59,23 +60,72 @@ dependency-cruiser **18**
 - **`target`/`lib` es `es2024`, no `es2025`.** Es deliberado: `es2025` traería los tipos de
   `Temporal` al ámbito global y Node 24 no lo implementa sin flag, así que compilaría y
   reventaría en ejecución. Si necesitas `Temporal`, impórtalo explícitamente del polyfill.
+- **`Temporal` se importa desde `@oa/temporal`**, que lo reexporta desde su único módulo
+  `src/temporal.ts`. **Ningún otro archivo importa el polyfill.** Es lo que hace que cambiar de
+  polyfill sea una línea, y `temporal-polyfill` se eligió sabiendo que no es el de los
+  champions. Ver ADR-018.
+- **No instales `rrule`.** `rrule-temporal` es `devDependency` y solo oráculo diferencial de la
+  expansión. El motivo no es que `rrule` esté poco mantenido: devuelve `Date` cuyo significado
+  depende de la zona del proceso, lo que ningún guardrail de este repositorio puede ver y un CI
+  en UTC enmascara. Ver ADR-018.
 
 ## Dónde vive la documentación
 
 - Diseño: `docs/arquitectura/00..07-*.md`
 - Decisiones: `docs/arquitectura/adr/` — formato estándar, numeración correlativa.
 - **Toda decisión que contradiga un ADR vigente exige un ADR nuevo que lo reemplace.**
-  No se edita un ADR aceptado: se supera con otro.
+  Un ADR aceptado **no cambia de decisión**: se supera con otro.
+- **Sí admite notas fechadas**, y son la práctica de la casa (ADR-003, ADR-005, ADR-018): que una
+  pregunta abierta confirmó lo ya decidido, que la justificación pasó de hipotética a empírica, o
+  que un ejemplo del propio ADR resultó engañoso. Son aditivas y dicen explícitamente que ninguna
+  decisión cambia. **Si la nota tendría que alterar la decisión, no es una nota: es el ADR que
+  falta.**
 - Preguntas abiertas pendientes de respuesta: `docs/arquitectura/06-preguntas-abiertas.md`.
 
 ## Límites que no se cruzan sin un ADR nuevo
 
-1. `packages/engine` y `packages/temporal` **no tienen dependencias de I/O**: ni base de
-   datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un parámetro.
-   `dependency-cruiser` lo verifica en CI **y está demostrado que salta** — pero solo ve
-   **imports**. `Date.now()`, `new Date()` y `Math.random()` son globales, no módulos: **hoy no
-   los detecta nadie.** Mecanizarlo es entrega de la fase 1, dueño `engine-dev`. Hasta
-   entonces, esa mitad de la regla la sostienes tú, no la herramienta.
+1. `packages/engine`, `packages/temporal` y `packages/domain` **no tienen dependencias de
+   I/O**: ni base de datos, ni HTTP, ni sistema de archivos, ni reloj. `now` siempre es un
+   parámetro, y **la zona horaria también**: en el núcleo no se lee nunca la del proceso.
+   Son **tres mecanizaciones y ninguna sustituye a las otras** — las tres están demostradas en
+   rojo. Si lees «`dependency-cruiser` lo verifica» y asumes que cubre `Date.now()`, te has
+   equivocado de herramienta:
+   `dependency-cruiser` cubre el I/O **importado**; el plugin GritQL
+   `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit` cubre lo que es **global y no import**; y
+   la regla `polyfill-temporal-solo-en-su-modulo` mecaniza el punto único de importación del
+   polyfill (ADR-018 §1). El plugin alcanza además a `packages/ical`, que no es I/O-libre por
+   la misma razón sino porque su salida debe ser reproducible byte a byte (ADR-017). Que cada
+   guardrail siga mirando lo que debe lo verifican `depcruise:cobertura` y
+   `guardrail:cobertura` — sin ellos, un alcance que deja de casar sale en verde.
+
+   **Prohibido por forma:** `Date.now`, `Math.random`, `new Date()` sin argumentos,
+   `Temporal.Now` (cualquier miembro) y cualquier acceso a `resolvedOptions` — no solo
+   `.timeZone`, porque la lectura estrecha se esquiva extrayendo una variable.
+
+   **Prohibidos por receptor entero**, sin enumerar miembros: `globalThis`, `crypto` y
+   `performance`. Enumerar miembros ya falló una vez aquí: `performance.now` estuvo en la
+   lista **un día** mientras `performance.timeOrigin` —la misma lectura de reloj— pasaba
+   limpio. Atajar el receptor cierra además el alias (`const c = crypto; c.randomUUID()`
+   dispara), que importa porque el límite nº9 prohíbe el azar *incluso con semilla*.
+
+   **Permitido y no dispara:** `new Date(argumento)`, `Math.max`, `Math.floor`,
+   `Temporal.PlainDate.from(...)` y `new Intl.DateTimeFormat(locale, { timeZone })` con la
+   zona explícita. **Los tres receptores enteros son la excepción a esa simetría: no tienen
+   ninguna forma permitida**, y es deliberado — el runtime está fijado por `engines` y el
+   polyfill entra por import, así que no hay detección de capacidades que justificarlos.
+
+   **Quedan fuera a propósito y hoy los sostienes tú:** `process` (excluido de `IO_NATIVO` en
+   `.dependency-cruiser.cjs` por falsos positivos; prohibirlo aquí contradiría esa decisión) y
+   `navigator.language`. Cerrar cualquiera de los dos es una línea el día que se decida.
+
+   **Si necesitas una excepción, es un ADR — no un `biome-ignore`.** Es la única defensa
+   contra el modo por el que mueren estos guardrails, y ya hay precedente: ADR-017 fijó esa
+   doctrina para `ical`.
+
+   **Lo que ningún patrón sintáctico puede ver**, y por tanto lo sostienes tú: acceso
+   computado (`Temporal["Now"]`), alias por identificador (`const T = Temporal`) y receptor
+   entre paréntesis con aserción de tipo. Cerrarlos exigiría análisis de tipos, que los
+   plugins de Biome no hacen.
 2. El validador del motor **no importa nada del módulo de colocación**. La duplicación es
    deliberada: si compartieran utilidades, la validación sería una tautología.
 3. **Ningún campo que registre, insinúe o permita inferir información médica.** Las
@@ -114,6 +164,29 @@ motivacional, ni rellenar cada minuto disponible del día.
 - La unidad de planificación es la **jornada** (`[wake, nextWake)`), no el día calendario.
   La semana es una ventana de consulta, nunca una entidad. **No existe tabla `weeks`.**
 - Un plan imposible **no es un error**: es `200 OK` con `feasibility: "INFEASIBLE"`.
+- Los instantes del `.ics` (`DTSTAMP`, `CREATED`, `LAST-MODIFIED`) salen de la versión del
+  plan, **nunca del reloj**. Ver ADR-017.
+- Políticas de expansión de recurrencia, elegidas y no heredadas (ADR-018): `disambiguation:
+  'compatible'` ante horas de pared inexistentes o ambiguas; las duraciones son minutos
+  **reales** sobre la línea de instantes, no hora de pared, así que un bloque que contiene un
+  cambio de horario dura lo que dura; `WKST=MO` en toda expansión, y `week_starts_on` es
+  **pura presentación** — no llega nunca al expansor, porque haría que *qué instancias existen*
+  dependiera de un ajuste de visualización.
+- **Zonas de referencia para fixtures. No son intercambiables** (detalle en `07 §4.E`):
+
+  | Zona | Para qué |
+  |---|---|
+  | `America/Mexico_City` | Medianoche **aislada** de DST: separa los dos bugs, que son distintos |
+  | `America/Chicago` | Jornadas de 23 h/25 h. Transiciones 2026: **03-08** y **11-01** |
+  | `Europe/Madrid` | Horas inexistentes y ambiguas (02:30). Con regla UE, hueco **y** pliegue caen en 02:00–02:59; con regla de EE. UU. no. Transiciones 2026: **03-29** y **10-25** |
+  | `Australia/Lord_Howe` | Salto de **30 min**. Un motor que asuma 60 pasa todo lo demás |
+  | `Asia/Kolkata` | Offset no entero (+05:30) |
+
+  **`America/Mexico_City` no sirve para ninguna fixture de cambio de horario**: México suprimió
+  el horario de verano en 2022 y su tzdata no tiene transiciones futuras. Un test de «02:30
+  ambigua» escrito con ella pasa en verde **con un motor que no implemente desambiguación en
+  absoluto** — y es la zona de ejemplo en `02`, `04` y ADR-003, así que la trampa es fácil de
+  pisar.
 
 ## Git
 

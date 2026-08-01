@@ -34,6 +34,25 @@ Tres reglas, en este orden de precedencia:
 Una jornada es el ciclo de vigilia `[wakeAt, nextWakeAt)`, expresado en instantes absolutos.
 El sueño de la jornada es `nextWakeAt − sleepAt`; la vigilia es `sleepAt − wakeAt`.
 
+> **Nota fechada (2026-07-30): la fórmula necesita un acotado, y ninguna decisión cambia.** Al
+> implementar la fase 1 apareció que `sleepAt` puede caer **después** de `nextWakeAt`: `sleepAt` es
+> una hora local de la zona del día `d` y `nextWakeAt` puede estar en otra zona, así que un viaje
+> hacia el este comprime la jornada. México → Lord Howe **el 2026-01-05** son 17 h de salto —en
+> agosto son 16,5, porque el horario de verano austral va de octubre a abril—: la jornada dura 7 h y
+> la vigilia declarada 16. Tal cual, `sueño` salía **negativo** — pero el daño real era otro: el
+> intervalo de vigilia se salía de la jornada e **invadía la siguiente**, así que la capacidad de
+> esos minutos se contaba dos veces.
+>
+> La fórmula pasa a ser `sueño = nextWakeAt − min(sleepAt, nextWakeAt)`, con los minutos recortados
+> conservados aparte como evidencia. Es una **precisión**, no una decisión nueva: hace total una
+> fórmula escrita para el caso de una sola zona, sin tocar ninguna de las tres reglas de este ADR.
+> Detalle y consecuencias en [03 §3.1](../03-motor-de-planificacion.md).
+>
+> **Esto lo produce la decisión de más abajo de que el perfil de sueño es siempre local y no lleva
+> anclaje** ("el cuerpo viaja con la persona"). Sigue siendo la correcta: la alternativa —anclar el
+> sueño a la zona de origen— pondría a la persona durmiendo a las cuatro de la tarde de donde está.
+> El coste de esa decisión es exactamente este caso, y ahora está acotado en vez de latente.
+
 **2. Todo instante se almacena en UTC (`timestamptz`); toda intención horaria humana guarda
 además su zona IANA.** "Los martes a las 9:00" es una regla que se expande **en la zona en
 que se pensó**, no en UTC.

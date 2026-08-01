@@ -20,8 +20,10 @@ coverage/
 .cache/
 *.local
 
-# Memoria de agentes — estado derivado, la fuente de verdad está en docs/arquitectura/
-.claude/agent-memory/
+# Memoria de agentes — estado derivado, la fuente de verdad está en docs/arquitectura/.
+# Sin anclar a propósito: el directorio se crea junto al cwd de la sesión, no en la raíz,
+# así que `.claude/agent-memory/` a secas solo casaría en la raíz y dejaría escapar el resto.
+**/.claude/agent-memory/
 
 # Editor / SO
 .DS_Store
