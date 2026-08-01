@@ -8,7 +8,11 @@
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "dependencies": {
+    "temporal-polyfill": "catalog:"
+  },
   "devDependencies": {
+    "rrule-temporal": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

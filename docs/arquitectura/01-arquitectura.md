@@ -92,7 +92,7 @@ graph TB
 | `apps/api` | Autenticación, autorización, transacciones, materialización de la entrada del motor, persistencia de versiones | No decide colocación ni prioridades |
 | `packages/engine` | **Todas** las reglas de la §4 del brief | No conoce Postgres, HTTP, `Date.now()` ni el usuario |
 | `packages/temporal` | Aritmética temporal correcta (jornadas, DST, recurrencia, medianoche) | No conoce el dominio de planificación |
-| `packages/ical` | Emisión y parseo de `.ics` | No decide qué se exporta |
+| `packages/ical` | Emisión y parseo de `.ics` | No decide qué se exporta. **No lee el reloj**: los instantes del `.ics`, `DTSTAMP` incluido, entran como dato ([ADR-017](./adr/ADR-017-determinismo-del-ics.md)) |
 
 **La frontera que no se cruza:** ningún tipo de Drizzle, ninguna fila de base de datos y
 ningún `Date` construido desde el reloj entra en `packages/engine`. El API traduce.

@@ -101,14 +101,29 @@ error de diseño que lleva a "generar un calendario que fracasará".
 función construirJornadas(ventana, perfil, excepcionesDia, overridesZona):
     jornadas = []
     para cada fecha local d en ventana:
-        zona    = zonaEfectivaEn(d, overridesZona, perfil.baseTimezone)
+        zona    = zonaEfectivaEn(d,   overridesZona, perfil.baseTimezone)
+        zonaSig = zonaEfectivaEn(d+1, overridesZona, perfil.baseTimezone)   // ← ojo: d+1
         wake    = instante(d,    excepcionDe(d)?.wakeLocal  ?? perfil.defaultWakeLocal,  zona)
-        wakeSig = instante(d+1,  excepcionDe(d+1)?.wakeLocal ?? perfil.defaultWakeLocal, zona)
+        wakeSig = instante(d+1,  excepcionDe(d+1)?.wakeLocal ?? perfil.defaultWakeLocal, zonaSig)
         sleep   = instante(d,    excepcionDe(d)?.sleepLocal ?? perfil.defaultSleepLocal, zona)
         si sleep <= wake:  sleep = sleep + 1 día     // cruza medianoche: caso NORMAL
-        jornadas.push({ id: índice, wake, sleep, wakeSig,
+
+        // PRECONDICIÓN. Solo la viola un salto de huso hacia el este de más de 24 h dentro de
+        // una jornada (existe: Pacific/Midway -11 -> Pacific/Kiritimati +14 son 25 h). Una
+        // jornada de duración negativa rompe el embaldosado, así que se REPORTA y no se emite
+        // en silencio. Qué hace el motor con ella se decide en la fase 3, con el caso delante.
+        si wakeSig <= wake:  reportar JornadaDegenerada(d, wake, wakeSig);  continuar
+
+        // ACOTADO AL FIN DE LA JORNADA. `sleep` es una hora local de la zona de `d`, y `wakeSig`
+        // puede estar en OTRA zona: viajando al este, la hora de acostarse puede caer DESPUÉS
+        // del despertar siguiente. Sin este `min`, el intervalo [wake, sleep) se sale de la
+        // jornada e invade la siguiente, y `brutoAsignable` cuenta esos minutos DOS VECES.
+        recorteVigilia = max(0, sleep - wakeSig)      // 0 en toda jornada que no cruza husos
+        sleep          = min(sleep, wakeSig)
+
+        jornadas.push({ id: índice, wake, sleep, wakeSig, recorteVigilia,
                         vigilia:  sleep - wake,      // duración REAL, tolera DST
-                        sueño:    wakeSig - sleep })
+                        sueño:    wakeSig - sleep }) // >= 0 SIEMPRE, por el acotado
     devolver jornadas
 ```
 
@@ -117,6 +132,100 @@ otra parte del motor vuelve a razonar sobre horas locales: opera con instantes a
 Ese confinamiento es intencional — es la única forma de que los bugs de medianoche no se
 repartan por todo el código.
 
+**`zonaEfectivaEn(d, …)` cruza una fecha civil con intervalos de instantes por el inicio del día
+civil `d` en la zona base** (fijado el 2026-07-30; antes no estaba definido y es exactamente la
+clase de detalle que se reinventa distinto en cada fase). `timezone_overrides.during` es un
+`tstzrange` y `d` es una fecha civil: hace falta un instante para preguntar, y ese instante es el
+comienzo de `d` en `perfil.baseTimezone`.
+
+Por qué ese y no otro: es lo único que hace `zonaEfectivaEn` **función pura de `d`**, y de ahí sale
+el embaldosado. Si el instante de consulta dependiera de `wake` —que es lo intuitivo— habría una
+circularidad: `wake` necesita la zona y la zona necesitaría `wake`. Y como `wakeSig` de la jornada
+`d` se resuelve con `zonaEfectivaEn(d+1)`, que es literalmente la misma llamada que hará `wake` de
+la jornada `d+1`, las dos coinciden por construcción y no por cuidado. **Coste aceptado:** un
+override que empieza a mediodía se aplica desde el comienzo del día civil, así que se adelanta unas
+horas. Es el mismo residuo de la frontera dentro de la jornada, y se paga una vez aquí en vez de
+esparcido.
+
+> **Corregido el 2026-07-29: `zonaSig`.** Este pseudocódigo calculaba `wakeSig` con la zona
+> efectiva en `d`, no en `d+1`. Con un viaje que empieza en `d+1`, el `wakeSig` de la jornada `d`
+> caía a las 07:00 de la zona **de origen** mientras que el `wake` de la jornada `d+1` caía a las
+> 07:00 de la zona **de destino**: las dos jornadas dejaban de encajar y la línea de tiempo
+> quedaba con un hueco —o un solape— de la anchura de la diferencia de offsets. Ahí se pierde o se
+> duplica capacidad, sin que nada lo señale.
+>
+> Lo destapó la pregunta *"¿qué propiedad no trivial tiene la construcción de jornadas?"* al
+> sustituir la property test tautológica de la fase 1 (auditoría de `qa-engineer`,
+> [`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md) §2). La propiedad que
+> reemplaza a la tautología es precisamente `∀ i: jornada[i].wakeSig == jornada[i+1].wake`, y este
+> defecto es el primer fallo que habría cazado. Escrito el criterio, apareció el bug: la property
+> test correcta no solo prueba mejor, obliga a pensar la invariante.
+>
+> **Queda un residuo sin decidir**, y no se decide aquí porque no hay caso delante: un
+> `timezone_overrides` cuya frontera cae **dentro** de una jornada (viaje que empieza a mediodía).
+> Este pseudocódigo asigna una sola zona a `wake` y `sleep`, así que ese caso sigue mal modelado.
+> La property test lo señalará el día que aparezca una fixture así, que es la forma correcta de
+> encontrarlo.
+
+> **Resuelto el 2026-07-30 el residuo transmeridiano, y no era un problema de reporte: era un
+> doble conteo de capacidad.** Al implementar la etapa 2 (`c718e06`) apareció con fixture delante
+> que `sleep < wakeSig` **es falsa**, y no por un bug: con un override hacia el **este** que empieza
+> en `d+1`, la jornada de `d` pierde tantos minutos como salte el offset. México → Madrid **el
+> 2026-08-03** (8 h) con sueño de 8 h da `sueño = 0`; México → Lord Howe **el 2026-01-05** (17 h) lo
+> daba **negativo**. Los tres instantes
+> son correctos y el embaldosado se mantiene: la noche se comprime **de verdad**, porque volar al
+> este acorta el día.
+>
+> **Ningún salto de huso es un número fijo: es un número por fecha.** Los 17 h de arriba solo valen
+> en **verano austral** (octubre–abril), cuando Lord Howe está en +11:00; en agosto está en +10:30
+> y el salto son 16,5 h. Los 8 h de Madrid solo valen en **verano europeo**: en enero es CET y son
+> 7 h, con lo que el sueño no es 0 sino 60 min. Las cuatro combinaciones están tabuladas con su
+> fecha en el criterio de aceptación de la fase 1 del [05](../05-plan-de-implementacion.md), y las
+> cuatro van a la suite. **Nunca se escribe un offset ni un salto sin la fecha en la que se midió**;
+> es la tercera vez que un número plausible sin su condición sobrevive en varios documentos.
+>
+> **Lo que estaba roto no era el signo del sueño, sino la vigilia.** Con un salto de 17 h la
+> jornada dura 7 h y la vigilia declarada son 16 h: el intervalo `[wake, sleep)` —que es
+> exactamente lo que §3.2 resta para obtener los huecos— **se salía de la jornada y se solapaba con
+> la siguiente**. Las dos jornadas reclamaban los mismos minutos y `brutoAsignable` los sumaba dos
+> veces. Un `sueñoMinutes` negativo era el síntoma visible de un solape invisible.
+>
+> **Por eso `sleep = min(sleep, wakeSig)` no es una preferencia, es una necesidad estructural**, y
+> por eso el acotado va en la construcción de la jornada y no en `calcularHuecos`: la invariante
+> "una jornada no reclama minutos de otra" pertenece a la jornada. Con el acotado, `sueño ≥ 0`
+> siempre y la propiedad correcta pasa a ser **`wake < sleep <= wakeSig`**, con `<=`. La igualdad
+> es el caso real de la noche perdida.
+>
+> **El dato no se pierde: se conserva como `recorteVigilia`**, los minutos de vigilia declarada que
+> no cupieron en la jornada. Vale 0 en absolutamente toda jornada que no cruce un salto de huso, y
+> es lo único que permite a F2 distinguir *"dormiste 4 h porque te acostaste tarde"* de *"tu
+> jornada se acortó 9 h al cruzar husos"*. Sin ese número, las dos situaciones son el mismo
+> `sueño` bajo y la explicación al usuario sería falsa. Es un campo **derivado**, no una entrada:
+> no toca el esquema, ni la API, ni la superficie de privacidad.
+>
+> **No es `INFEASIBLE`, y conviene decir por qué**, porque la tentación es fuerte. §3.1 dice que si
+> un deadline solo cabe sacrificando sueño el resultado correcto es `INFEASIBLE`, pero eso
+> gobierna lo que **el motor** puede hacer: el motor no compra tiempo quitando sueño. Aquí nadie
+> sacrifica nada — el usuario cogió un vuelo. Declarar imposible un plan de 14 días porque una de
+> sus jornadas es un viaje transatlántico sería negarse a planificar por un hecho ordinario, y la
+> regla nº6 existe para lo contrario: para no callar cuando algo **de verdad** no cabe.
+>
+> **Sí es el caso extremo de `SLEEP_DEBT`, y la maquinaria ya está.** `déficitSueño = sleepNeed` al
+> ser `sueño = 0` dispara `prohibeFocoNocturno` y `techoEnergía`, que es exactamente el
+> comportamiento correcto para el día de un vuelo nocturno: nada de trabajo profundo, nada alcanza
+> `PEAK`. Cero maquinaria nueva.
+>
+> **Lo que queda para la fase 3, nombrado para que sea elección y no descubrimiento:** (a) si F2
+> emite un `Finding` distinto o reutiliza `SLEEP_DEBT` con `recorteVigilia` en la evidencia — la
+> segunda es más barata y basta si la interfaz sabe redactar dos plantillas; (b) si un `techo` de
+> `NEUTRAL` es suficiente para una jornada de sueño cero o debería ser `LOW`, que es calibración y
+> no estructura; (c) qué hace el motor con una `JornadaDegenerada`. Ninguna de las tres bloquea la
+> fase 1.
+>
+> **Viajando al oeste no hay nada que arreglar**: la jornada se alarga y `sueño` crece. La vigilia
+> no cambia, así que la capacidad tampoco. Un `sueño` de 16 h no es lo que hace un cuerpo, pero es
+> tiempo que no se planifica, y sobreestimar el descanso no produce ningún plan malo.
+
 **Aritmética del sueño como restricción dura:**
 
 ```
@@ -124,14 +233,26 @@ déficitSueño(j) = max(0, perfil.sleepNeedMinutes − duración(j.sueño))
 si déficitSueño(j) > 0:
     j.prohibeFocoNocturno = true          // sin bloques de foco en el último tramo
     j.techoEnergía = NEUTRAL              // nada alcanza PEAK ese día
-    emitir Finding SLEEP_DEBT con evidencia { requerido, real, déficit }
+// El Finding NO nace aquí: la Jornada lleva la evidencia y lo emite F2 (§4).
 ```
+
+**Dónde nace el `Finding SLEEP_DEBT`** (precisado el 2026-07-30). Este bloque decía *"emitir
+Finding SLEEP_DEBT"* dentro de `construirJornadas`, y eso **cruza una frontera de paquetes**:
+`Finding` es un tipo del dominio y vive en `EngineOutput.diagnosis`, mientras que
+`packages/temporal` es aritmética temporal y no conoce el dominio. La construcción de jornadas
+**calcula y expone la evidencia** —`sueñoMinutes`, `déficitSueñoMinutes`, `recorteVigilia`,
+`prohibeFocoNocturno`, `techoEnergía`— y **F2 emite el `Finding` verbatim desde ella**, sin
+recalcular nada. `engine-dev` mantuvo la frontera al implementar y tiene razón: el reparto es el
+correcto y este documento prometía lo contrario.
 
 La consecuencia práctica: **el motor no puede resolver un déficit de sueño quitando sueño.**
 Es la única restricción del sistema que nunca cede, ni siquiera ante un deadline duro. Si el
 deadline solo cabe sacrificando sueño, el resultado correcto es `INFEASIBLE`.
 
 ### 3.2 Huecos libres con nivel de energía
+
+**Un hueco es un tramo de tiempo libre contiguo. Un hueco no tiene un nivel de energía: tiene un
+perfil de energía.** Las dos cosas se calculan en pasos separados y solo la primera corta.
 
 ```
 función calcularHuecos(jornada, compromisos, transiciones, bienestarFijo):
@@ -142,40 +263,145 @@ función calcularHuecos(jornada, compromisos, transiciones, bienestarFijo):
             ocupado.push(intervaloDe(t, c))      // antes o después según el tipo
     huecos = restar(intervalo(jornada.wake, jornada.sleep), unir(ocupado))
     para cada hueco h:
-        h.tier = nivelEnergía(h, franjasEnergía, jornada)
+        h.perfilEnergía = segmentarEnergía(h, franjasEnergía, compromisos, modificadores, jornada)
     devolver huecos
 ```
 
-**Nivel de energía de un hueco** — aquí está la implementación del cronotipo y del arrastre:
+**Solo el tiempo ocupado corta un hueco.** Nada de lo que afecta a la *calidad* del tiempo —una
+franja de energía, el arrastre de un compromiso pesado, un modificador de capacidad, el techo por
+deuda de sueño— parte un hueco en dos, porque **ninguna de esas cosas interrumpe nada**: la
+persona puede trabajar de 21:45 a 23:15 sin levantarse aunque su pico empiece a las 22:00.
+
+**Perfil de energía de un hueco** — aquí está la implementación del cronotipo y del arrastre:
 
 ```
-función nivelEnergía(hueco, franjas, jornada):
-    base = franjaQueContiene(hueco).tier         // PEAK | NEUTRAL | LOW
-    // Arrastre de compromisos pesados (la variante "persona que imparte clases")
-    para cada compromiso c con energyCost = HIGH que termina antes del hueco:
-        si hueco.inicio < c.fin + c.drainsAfterMinutes:
-            base = degradar(base)                // PEAK->NEUTRAL, NEUTRAL->LOW
-    // Deuda de sueño
-    si jornada.techoEnergía:  base = min(base, jornada.techoEnergía)
-    // Modificador de capacidad declarado por el usuario
-    si modificadorActivo(hueco) = NONE:      devolver SIN_FOCO
-    si modificadorActivo(hueco) = REDUCED:   base = min(base, LOW)
-    devolver base
+retículo de niveles:  SIN_FOCO < LOW < NEUTRAL < PEAK
+                      TODA influencia es un MÍNIMO con un nivel fijo: ninguna sube el nivel, y
+                      ninguna depende de cuántas otras haya. Por tanto `tierEn` es el ínfimo de
+                      un conjunto de cotas independientes: idempotente, conmutativa y ajena al
+                      orden de iteración. NO hay decrementos encadenados.
+                      SIN_FOCO es CALCULADO y no se persiste: el enum `energy_tier` de la base
+                      de datos tiene tres valores, no cuatro (02 §3).
+                      OJO (2026-07-30): hoy `Jornada.techoEnergía` está tipado `"NEUTRAL" | null`
+                      en packages/temporal, y es correcto — es el único valor que §3.1 produce y
+                      el paquete no debe inventarse un enum del dominio. Cuando el tier calculado
+                      de cuatro valores exista en `contracts`, AMPLIAR ese campo a ese tipo. Si
+                      la fase 3 decide que una jornada de sueño cero tiene techo LOW y nadie
+                      amplió el tipo, el compilador lo dirá; si nadie lo lee, no.
+
+función tierEn(t, franjas, compromisos, modificadores, jornada):
+    nivel = franjaEn(t, franjas)?.tier ?? NEUTRAL      // sin franja declarada => NEUTRAL
+    para cada compromiso c con energyCost = HIGH:
+        si c.fin <= t < c.fin + c.drainsAfterMinutes:  // SOLO dentro de la ventana de arrastre
+            nivel = min(nivel, LOW)                    // NO se compone: dos arrastres = uno
+    si jornada.techoEnergía:  nivel = min(nivel, jornada.techoEnergía)   // deuda de sueño
+    según modificadorEn(t, modificadores):
+        NONE:     nivel = SIN_FOCO
+        REDUCED:  nivel = min(nivel, LOW)
+        NORMAL, ninguno: sin cambio
+    devolver nivel
+
+función segmentarEnergía(hueco, franjas, compromisos, modificadores, jornada):
+    // Fronteras: todo instante donde alguna influencia empieza o acaba. Entre dos fronteras
+    // consecutivas NADA cambia, así que evaluar en el inicio del tramo es exacto.
+    fronteras = { hueco.inicio, hueco.fin }
+              ∪ { inicio y fin de cada franja de energía }
+              ∪ { c.fin  y  c.fin + c.drainsAfterMinutes  de cada c con energyCost = HIGH }
+              ∪ { inicio y fin de cada modificador de capacidad }
+    fronteras = ordenar(fronteras ∩ [hueco.inicio, hueco.fin])
+    segmentos = [ { inicio: a, fin: b, tier: tierEn(a, …) }
+                  para cada par consecutivo (a, b) de fronteras ]
+    devolver fusionarAdyacentesDelMismoTier(segmentos)
 ```
+
+`h.perfilEnergía` es una **partición total del hueco**: los segmentos son contiguos, no se
+solapan, cubren el hueco exacto y ninguno tiene duración cero. Un hueco de tarde libre de un
+cronotipo nocturno produce `NEUTRAL → PEAK → NEUTRAL`, tres segmentos y **un solo hueco**.
 
 El cronotipo no aparece en ningún `if`. Un pico a las 05:00 y uno a las 23:00 recorren
 exactamente el mismo camino. **Eso es la garantía estructural de que el motor no favorece al
 madrugador**, y es verificable con un test: espejar todas las franjas de un caso y comprobar
 que la calidad de la asignación es equivalente.
 
+> **Precisión del 2026-07-29 — `franjaQueContiene` no estaba definida.** `qa-engineer` la
+> encontró al diseñar el caso del cronotipo 22:00–01:00
+> ([`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md)): `nivelEnergía`
+> arrancaba con `base = franjaQueContiene(hueco).tier`, que presupone que el hueco cabe dentro de
+> **una** franja, y `calcularHuecos` nunca corta en las fronteras de `energy_windows`. Un usuario
+> con la tarde libre y pico 22:00–01:00 tiene un hueco que abarca `NEUTRAL→PEAK→NEUTRAL`, y ahí la
+> función no tenía valor. **No cambia ninguna decisión**: la hace total, en la única dirección que
+> el resto del diseño ya exigía.
+>
+> **Se descartó trocear el hueco en las fronteras de franja**, que era la salida más obvia. Habría
+> convertido cada tramo en una unidad de colocación independiente, y entonces la restricción dura
+> nº 1 (`duración(h) >= duraciónRequerida`) se aplicaría por tramo: **un pico de 45 min entre dos
+> tramos neutros dejaría de ser colocable para nada**, cuando la realidad es que un bloque de 90
+> min puede montarse a caballo y aprovechar esos 45 min de pico. Trocear también habría cambiado
+> el número de plazas de colocación y con él el tope emergente de
+> [ADR-015](./adr/ADR-015-parametros-de-calibracion.md). Segmentar el perfil **sin** trocear el
+> hueco da el pico como pico sin tocar ni las plazas ni el mínimo de 60 min.
+>
+> **Se descartó también un `tier` por hueco con regla de resolución** (el mayor, el del inicio, el
+> mayoritario): cualquiera de las tres etiqueta una tarde libre larga con un solo nivel y **el
+> pico deja de ser colocable como pico**, que es la funcionalidad entera del cronotipo.
+>
+> **`NONE` no corta el hueco, y eso lo decide [ADR-011](./adr/ADR-011-privacidad-por-diseno.md)
+> §2**, no una preferencia: ahí la indisponibilidad es un `FixedCommitment` y la *menor capacidad
+> de foco* es un `CapacityModifier`. Son dos cosas distintas a propósito. `focus_capacity = NONE`
+> significa "este tiempo existe y está libre, pero no admite foco" — sigue siendo colocable para
+> admin, seguimientos o bienestar. Tratarlo como tiempo ocupado habría borrado tiempo real de la
+> jornada y habría hecho de `capacity_modifiers` un segundo mecanismo de indisponibilidad, que es
+> justo lo que ADR-011 separó. Por eso `SIN_FOCO` sigue siendo un nivel del retículo y no una
+> ausencia.
+>
+> **El arrastre degrada solo su ventana.** Antes, `si hueco.inicio < c.fin + c.drains` degradaba
+> el hueco **completo**: un hueco de cuatro horas que empezaba un minuto antes de que expirara el
+> arrastre perdía cuatro horas de calidad por un minuto de solape. Ahora la condición es
+> `c.fin <= t < c.fin + c.drains`, evaluada por segmento. Es la misma regla, aplicada donde
+> corresponde.
+>
+> **El arrastre es `min(nivel, LOW)` y NO se compone** (segunda precisión del 2026-07-29). Antes
+> era `degradar(nivel)`, un decremento de un paso, y eso tenía tres problemas:
+>
+> 1. **Contradecía [02 §4](../02-modelo-de-datos.md)**, que es donde se definió la variante y que
+>    dice literalmente: *"un bloque `HIGH` con arrastre de 90 min degrada a **`LOW`** la energía de
+>    los 90 minutos siguientes"*. `degradar(PEAK)` da `NEUTRAL`, no `LOW`. Los dos documentos solo
+>    coincidían cuando la base ya era `NEUTRAL`.
+> 2. **No cumplía su propósito declarado.** [00](../00-vision-y-alcance.md) y 02 justifican el
+>    arrastre con *"el motor no colocará trabajo profundo justo después"*. Con la tabla de
+>    puntuación de §5.3, el foco profundo vale `NEUTRAL = +1`: positivo, así que el motor **sí** lo
+>    colocaría, solo con menos ganas. `LOW = −2` es lo que lo repele activamente. El decremento
+>    fallaba precisamente en el caso que más importa: el profesor cuyo pico viene justo después de
+>    su clase.
+> 3. **No era idempotente**, así que el resultado dependía de **cuántas** ventanas de arrastre
+>    solapaban y no de cuál: dos clases seguidas daban `LOW`, tres daban `SIN_FOCO`. Y `SIN_FOCO`
+>    habría sido indistinguible de un `capacity_modifier` `NONE` declarado por el usuario, que
+>    semánticamente es otra cosa (ADR-011 §2), **y además habría descontado esos minutos de
+>    `brutoAsignable`**: un efecto de capacidad producido por acumulación accidental. Con `min(·,
+>    LOW)` el suelo del arrastre es `LOW` por construcción y esa colisión es imposible; no hace
+>    falta ningún tope.
+>
+> Que dos clases seguidas "agoten más que una" es cierto como intuición, pero el sistema **no
+> tiene con qué medir ese más**: `drains_after_minutes` expresa *cuánto dura* el arrastre, no su
+> profundidad. Modelar la intensidad acumulada exigiría un campo que hoy no existe y que nadie ha
+> pedido. Si algún día hace falta, será una decisión con su ADR y no un efecto lateral del orden en
+> que se recorre un array.
+
 ### 3.3 Capacidad asignable
 
 ```
-brutoAsignable(j) = suma(duración de huecos con tier != SIN_FOCO)
+brutoAsignable(j) = suma(duración de SEGMENTOS con tier != SIN_FOCO)   // no de huecos enteros
 fricción(j)       = brutoAsignable(j) × params.friccionBasePct
                   + númeroDeTransiciones(j) × params.friccionPorTransiciónMin
 capacidad(j)      = brutoAsignable(j) − mantenimientoPersonal(j) − fricción(j)
 ```
+
+> **Precisión del 2026-07-29.** Antes decía "huecos con `tier != SIN_FOCO`", y con un solo `tier`
+> por hueco eso significaba que **un modificador `NONE` de media hora borraba de la capacidad el
+> hueco entero** que lo contuviera. Sumando por segmentos se descuentan exactamente los minutos
+> declarados, ni uno más. **Los números de ADR-015 no se mueven**: sus perfiles A y B se calcularon
+> sin ningún `capacity_modifier` declarado, así que las 22 plazas y el corte entre 8 y 10 objetivos
+> siguen igual. Lo que cambia es el caso del usuario que sí declara uno, y cambia a su favor.
 
 **Por qué la fricción tiene dos términos.** Un porcentaje fijo trata igual un día de una sola
 reunión y un día de seis, cuando el segundo es mucho más costoso: cada cambio de contexto
@@ -219,8 +445,15 @@ interface Finding {
 | `TRANSITION_LOAD` | `minutosTransición / minutosVigilia` | Coste invisible de los traslados |
 | `SLEEP_DEBT` | jornadas con `déficitSueño > 0` | Restricción dura violada |
 | `NO_PROTECTED_WELLBEING` | bienestar declarado sin hueco viable | Regla nº4 |
-| `FRAGMENTATION_RISK` | huecos < bloque mínimo útil / huecos totales | Fragmentos inútiles |
+| `FRAGMENTATION_RISK` | **huecos** < bloque mínimo útil / **huecos** totales | Fragmentos inútiles |
 | `DEADLINE_AT_RISK` | trabajo restante vs. capacidad hasta la fecha | Anticipa `INFEASIBLE` |
+
+**`FRAGMENTATION_RISK` se cuenta sobre huecos, nunca sobre segmentos de energía** (precisión del
+2026-07-29). Un hueco de cuatro horas cuyo perfil es `NEUTRAL→PEAK→NEUTRAL` **no está fragmentado**:
+nada lo interrumpe, la persona trabaja de un tirón y solo cambia la calidad del tiempo. Contar los
+segmentos aquí reportaría como día fragmentado uno que está entero, y sería un hallazgo falso
+mostrado al usuario. La fragmentación es discontinuidad causada por tiempo **ocupado** —
+compromisos y transiciones—, que es lo que el brief nombra y lo único que corta un hueco.
 
 `CAPACITY_GAP` merece una nota: la "capacidad ingenua" (vigilia menos trabajo) es una
 aproximación deliberadamente ingenua que sirve **solo** para el contraste narrativo —
@@ -334,11 +567,30 @@ semana apretada se quedaría sin sitio, que es la definición de "relleno".
 ### 5.3 Elección de hueco: función de puntuación
 
 ```
-función mejorHueco(bloque, huecosDisponibles, estadoDelDía):
-    candidatos = huecosDisponibles.filtrar(h => cumpleRestriccionesDuras(bloque, h, estadoDelDía))
+función mejorColocación(bloque, huecosDisponibles, estadoDelDía):
+    // Un candidato es un PAR (hueco, instante de inicio), no un hueco.
+    candidatos = []
+    para cada hueco h en huecosDisponibles:
+        para cada inicio en iniciosCandidatos(h, bloque):
+            candidatos.push({ h, inicio, tramo: [inicio, inicio + duración(bloque)) })
+    candidatos = candidatos.filtrar(c => cumpleRestriccionesDuras(bloque, c, estadoDelDía))
     si candidatos vacío: devolver NO_CABE
     devolver max(candidatos, por puntuación) con desempate determinista
+
+función iniciosCandidatos(hueco, bloque):
+    // El perfil de energía es constante a trozos, así que la puntuación es lineal a trozos en
+    // el desplazamiento del bloque: su máximo se alcanza SIEMPRE en un punto donde el inicio o
+    // el fin del bloque coincide con una frontera. Basta un conjunto finito y pequeño.
+    fronteras = { f.inicio, f.fin  de cada segmento f de hueco.perfilEnergía }
+    devolver { x ∈ fronteras ∪ { b − duración(bloque) : b ∈ fronteras }
+               : hueco.inicio <= x  ∧  x + duración(bloque) <= hueco.fin }
 ```
+
+**Por qué el candidato es un par y no un hueco** (precisión del 2026-07-29): con un `tier` por
+hueco, `mejorHueco` nunca decidía *dónde dentro* del hueco cae el bloque, así que un pico de
+22:00–01:00 dentro de una tarde libre era inalcanzable — el bloque caía donde cayera y puntuaba
+con un nivel único. Elegir el instante es lo que hace que el cronotipo se cumpla, y el conjunto
+finito de candidatos lo hace sin búsqueda continua ni pérdida de determinismo.
 
 **Restricciones duras (filtro binario, no puntuación):**
 
@@ -348,7 +600,8 @@ función mejorHueco(bloque, huecosDisponibles, estadoDelDía):
 3. temasDeFocoDistintosEn(día) + (bloque introduce tema nuevo ? 1 : 0)
        <= perfil.maxFocusTopicsPerDay
 4. minutosUsados(día) + duración(bloque) <= capacidad(día)
-5. h.tier != SIN_FOCO  si bloque requiere foco
+5. ningún minuto del tramo del bloque cae en un segmento SIN_FOCO, si el bloque requiere foco
+      (antes: `h.tier != SIN_FOCO`. Un hueco ya no tiene un único tier)
 6. jornada.prohibeFocoNocturno  =>  bloque FOCUS no puede caer en el último tramo
 7. hay hueco para las transiciones respecto a los bloques vecinos
 8. si bloque tiene ventana externa: h está dentro de esa ventana
@@ -357,18 +610,54 @@ función mejorHueco(bloque, huecosDisponibles, estadoDelDía):
 **Puntuación (todo lo demás):**
 
 ```
-puntuación(bloque, h) =
-      W_ENERGÍA     × ajusteEnergía(bloque.necesidad, h.tier)     // término dominante
-    − W_FRAGMENTO   × residuoInútil(h, bloque)      // penaliza dejar restos < 60 min
-    + W_CONTIGÜIDAD × contiguoConMismoObjetivo(h)   // menos cambios de contexto
-    − W_ARRASTRE    × proximidadACompromisoPesado(h)
-    − W_DISPERSIÓN  × objetivosYaTocadosEseDía      // empuja hacia la métrica de éxito
+puntuación(bloque, candidato) =
+      W_ENERGÍA     × ajusteEnergía(bloque.necesidad, candidato.tramo)   // término dominante
+    − W_FRAGMENTO   × residuoInútil(candidato)       // restos < 60 min a AMBOS lados del bloque
+    + W_CONTIGÜIDAD × contiguoConMismoObjetivo(candidato)
+    − W_ARRASTRE    × proximidadACompromisoPesado(candidato)
+    − W_DISPERSIÓN  × objetivosYaTocadosEseDía       // empuja hacia la métrica de éxito
     + W_URGENCIA    × cercaníaDelDeadline(bloque)
 
-ajusteEnergía:  FOCUS profundo    -> PEAK=3, NEUTRAL=1, LOW=-2
-                ADMIN / reactivo  -> LOW=3,  NEUTRAL=1, PEAK=-3   // ¡negativo!
-                bienestar         -> según preferred_tier
+// El bloque puede abarcar varios segmentos de energía: el ajuste es la MEDIA PONDERADA POR
+// MINUTOS del valor de cada segmento que el tramo toca.
+ajusteEnergía(necesidad, tramo) =
+    suma( duración(tramo ∩ seg) × valor(necesidad, seg.tier) ) / duración(tramo)
+
+valor:  FOCUS profundo    -> PEAK=3, NEUTRAL=1, LOW=-2
+        ADMIN / reactivo  -> LOW=3,  NEUTRAL=1, PEAK=-3   // ¡negativo!
+        bienestar         -> según preferred_tier
 ```
+
+> **Estos números son `params`, no literales, y la fase 4 no puede tratarlos de otro modo.** Los
+> seis pesos `W_*` y la tabla `valor` son **parámetros de calibración** y caen de lleno en el
+> límite nº 5 de `CLAUDE.md` ("ninguna constante mágica en el motor; todo número calibrable va en
+> `EngineInput.params`"). Hoy están escritos aquí como ilustración y **no aparecen en
+> [ADR-015](./adr/ADR-015-parametros-de-calibracion.md) ni en ningún `params` declarado**: es deuda
+> preexistente, anotada el 2026-07-29 al revisar la segmentación.
+>
+> **Por qué ahora importa más que antes.** Con un `tier` por hueco, `valor` se consultaba una vez
+> por bloque y solo ordenaba huecos entre sí. Con el perfil segmentado es el **peso de una media
+> ponderada por minutos**, así que las magnitudes relativas deciden **dónde exactamente** desliza el
+> bloque dentro del hueco. Que `PEAK` valga 3 y `NEUTRAL` 1 —y no 5 y 1— cambia cuánto pico está
+> dispuesto a sacrificar un bloque para evitar dejar un residuo inútil. El apalancamiento de estos
+> números subió; su condición de literales no.
+>
+> **Recomendación para la fase 4:** al calibrarlos, un **ADR nuevo** que los fije con su análisis
+> numérico, al estilo de ADR-015 y **sin editarlo** — ADR-015 no los menciona, así que no hay
+> contradicción que reemplazar, es una decisión sobre parámetros que él no cubrió.
+
+**La media ponderada es lo que alinea el bloque con el pico sin trocear nada.** Un bloque de foco
+de 90 min en una tarde libre con pico de 22:00 a 01:00 puntúa más alto cuanto más pico cubre, así
+que el maximizador lo desliza hasta encajarlo dentro del pico por sí solo. Y si el pico solo mide
+45 min, el bloque se monta a caballo y cobra por esos 45: nada se pierde por no llegar al mínimo.
+El comportamiento que el cronotipo promete **emerge de la puntuación**, no de una regla nueva.
+
+> **Pendiente para la fase 4, anotado para que sea una elección y no un descubrimiento:** con el
+> arrastre fijando `LOW` exactamente en su ventana (§3.2), el término `W_ARRASTRE` queda **muy
+> probablemente redundante**: `valor(FOCUS profundo, LOW) = −2` ya repele el foco de esa ventana con
+> fuerza, así que el término penalizaría dos veces lo mismo. Puede que siga valiendo para castigar
+> la *proximidad* a un compromiso pesado **más allá** de la ventana declarada, que es un efecto
+> distinto y que hoy nada modela. Se decide con el código delante y midiendo, no ahora.
 
 El valor **negativo** de colocar trabajo administrativo en la franja pico es deliberado: no
 basta con preferir el pico para el trabajo profundo, hay que **penalizar activamente** que lo
@@ -379,8 +668,10 @@ es la causa nº1 del brief.
 tocados por día). Es un caso raro y valioso de métrica de producto codificada directamente en
 la función objetivo.
 
-**Desempate determinista, sin aleatoriedad:** hueco más temprano en la jornada → jornada de
-índice menor → `identity_key` lexicográficamente menor. Nunca se usa un generador aleatorio,
+**Desempate determinista, sin aleatoriedad:** **instante de inicio más temprano** → hueco más
+temprano en la jornada → jornada de índice menor → `identity_key` lexicográficamente menor. El
+primer criterio es nuevo (2026-07-29) y es necesario: dos candidatos del mismo hueco con la misma
+puntuación solo se distinguen por su instante de inicio. Nunca se usa un generador aleatorio,
 ni siquiera con semilla. Un motor con aleatoriedad sembrada sigue siendo frágil ante
 reordenamientos de la entrada; el orden total explícito no.
 
