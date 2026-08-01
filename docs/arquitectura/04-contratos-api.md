@@ -233,6 +233,16 @@ GET  /api/v1/diagnosis/latest
         "slots": [{ "start": "…", "end": "…", "tier": "PEAK", "minutes": 90 }] }
     ]
   },
+  // `slots` son SEGMENTOS DE ENERGÍA, no huecos: cada uno tiene un `tier` uniforme, y un mismo
+  // tramo de tiempo libre contiguo puede producir VARIOS slots consecutivos y adyacentes
+  // (`NEUTRAL → PEAK → NEUTRAL` en una tarde libre con pico nocturno). No asumas un slot por
+  // hueco ni que dos slots adyacentes implican una interrupción entre ellos. Ver 03 §3.2.
+  // `assignableMinutes` excluye los slots con `tier: "SIN_FOCO"`; los slots sí se listan.
+  // OJO CON EL ENUM: el `tier` de un slot admite CUATRO valores —`PEAK`, `NEUTRAL`, `LOW` y
+  // `SIN_FOCO`—, uno más que el enum `energy_tier` de la base de datos, que tiene tres. `SIN_FOCO`
+  // es un nivel CALCULADO por el motor (lo produce un `capacity_modifier` `NONE`) y no se
+  // persiste nunca: ningún bloque colocado puede caer en él. No reutilices el mismo esquema Zod
+  // para las franjas declaradas por el usuario y para los slots calculados.
   "findings": [
     { "code": "PEAK_HOURS_OCCUPIED", "severity": "CRITICAL",
       "evidence": { "peakMinutesTotal": 900, "peakMinutesOccupied": 702, "ratio": 0.78 } },

@@ -1,0 +1,158 @@
+// Guardrail de reloj, zona ambiente y aleatoriedad en el núcleo — fase 1 de
+// 05-plan-de-implementacion.md.
+//
+// `dependency-cruiser` sostiene una mitad del límite nº1 ("sin I/O en el núcleo"), pero solo
+// ve IMPORTS. `Date.now()`, `new Date()` sin argumentos, `Math.random()`, `Temporal.Now` y la
+// zona del proceso son globales, no módulos: ninguna configuración suya puede verlos. Esta es
+// la otra mitad, y sin ella el determinismo del motor es una intención y no una garantía.
+//
+// POR QUÉ UN PLUGIN GRITQL Y NO `noRestrictedGlobals`.
+// Esa regla restringe el identificador entero, y aquí el identificador entero no es el
+// problema. Prohibir `Date` mataría `new Date(instanteISO)`; prohibir `Math` mataría
+// `Math.max` y `Math.floor`. Las tres son legítimas y van a aparecer constantemente en
+// aritmética temporal, así que la regla obligaría a poner excepciones cada dos archivos —
+// y un guardrail que se silencia a menudo deja de serlo. GritQL casa contra la forma
+// sintáctica exacta, que es justo la precisión que pide el plan.
+//
+// LOS PATRONES NO SON REDUNDANTES. Se comprobó uno por uno el 2026-07-29:
+//   `Date.now`     cubre la llamada Y la referencia suelta (`[...].map(Date.now)`).
+//   `Math.random`  ídem.
+//   `new Date()`   NO casa con `new Date` sin paréntesis.
+//   `new Date`     NO casa con `new Date()` con paréntesis. Hacen falta los dos.
+// Ninguno de los cuatro casa con `new Date(argumento)`, que es exactamente lo que se busca.
+//
+// LAS TRES PUERTAS QUE ABRE `Temporal` (ADR-018 §9), añadidas el 2026-07-29 en el mismo
+// commit que introdujo `packages/temporal/src/temporal.ts`. Antes de ese commit no había
+// ningún `Temporal` en el repositorio; el agujero se abre exactamente ahí, así que la valla
+// va en el mismo diff.
+//   `Temporal.Now`        cubre cualquier miembro y también la referencia suelta al espacio
+//                         de nombres, por el mismo motivo que `Date.now`: casa el nodo
+//                         `Temporal.Now` esté donde esté, así que `Temporal.Now.instant()`,
+//                         `.zonedDateTimeISO()`, `.timeZoneId()` y `algo(Temporal.Now.instant)`
+//                         disparan con un solo patrón. Está anclado al identificador literal
+//                         `Temporal`, así que un objeto local con propiedad `Now`
+//                         (`reloj.Now()`) NO dispara, y `Temporal.PlainDate.from(...)` o
+//                         `Temporal.Instant.fromEpochMilliseconds(0)` tampoco.
+//   `$formateador.resolvedOptions`
+//                         la zona ambiente. Decisión de G10 (docs/qa/fase-1-guardrail-
+//                         temporal-now.md) tomada en LECTURA AMPLIA y sin anclar el receptor,
+//                         no en la forma literal `Intl.DateTimeFormat().resolvedOptions()
+//                         .timeZone` que nombra ADR-018 §9. Tres razones:
+//                         (1) `resolvedOptions()` existe precisamente para informar de lo que
+//                         el entorno resolvió por defecto: `locale`, `calendar`,
+//                         `numberingSystem` y `timeZone` son los cuatro estado ambiente, y la
+//                         regla del núcleo es que la zona y el locale son parámetros;
+//                         (2) la forma literal se esquiva partiendo la expresión en dos
+//                         sentencias (`const o = Intl.DateTimeFormat().resolvedOptions();`
+//                         y `o.timeZone` más abajo), y un guardrail que cae con un refactor de
+//                         dos líneas no es un guardrail;
+//                         (3) sin anclar el receptor también casa
+//                         `new Intl.DateTimeFormat("es-MX").resolvedOptions().timeZone`, que
+//                         lee la zona ambiente igual que la forma literal y que la forma
+//                         literal NO ve, y cubre por igual `Intl.NumberFormat`,
+//                         `Intl.Collator` y cualquier otro constructor de `Intl`.
+//                         Coste aceptado: ningún uso de `resolvedOptions` es posible en estos
+//                         cuatro paquetes. No formatean para humanos —eso es `apps/web`— e
+//                         `ical` emite el formato básico de RFC 5545 desde `Temporal`, nunca
+//                         por `Intl`. Pasar la zona explícita al constructor sigue permitido
+//                         (`new Intl.DateTimeFormat("es-MX", { timeZone: zona })`); lo
+//                         prohibido es preguntarle al entorno qué resolvió.
+//                         Único falso positivo conocido y comprobado el 2026-07-29: un objeto
+//                         propio con un método llamado `resolvedOptions` dispara. Se acepta
+//                         porque `resolvedOptions` no es una palabra que se elija por
+//                         casualidad —a diferencia de `Now`, que sí, y por eso ese patrón sí
+//                         va anclado a `Temporal`— y porque el nombre está tomado por `Intl`.
+//
+// `performance.now` estuvo en esta lista el 2026-07-29 y duró un día: pasó al segundo bloque
+// como receptor entero en cuanto se vio que `performance.timeOrigin` se colaba. Queda anotado
+// porque la lección es esa y no el detalle.
+//
+// EL SEGUNDO BLOQUE: TRES RECEPTORES PROHIBIDOS ENTEROS, con diagnóstico propio.
+// `globalThis` (aprobado el 2026-07-30), `crypto` y `performance` (aprobados el mismo día, al
+// confirmarse que `crypto.getRandomValues()` sin prefijo no lo veía nadie). Los tres quedan
+// fuera de lo que enumera ADR-018 §9 y por eso se decidieron aparte, no de pasada.
+//
+// Se prohíbe el IDENTIFICADOR y no `$receptor.$miembro`, por dos razones distintas:
+//   a) enumerar miembros deja huecos, y está demostrado que los dejó. `performance.now`
+//      estuvo un día en la lista y `performance.timeOrigin` —que es la misma lectura de
+//      reloj— pasaba limpio. Lo mismo con `crypto.getRandomValues` frente a
+//      `crypto.randomUUID` y `crypto.subtle`.
+//   b) así cae también la referencia suelta (`algo(globalThis)`, `const c = crypto;`), que es
+//      el argumento que ya obligó a tener `Date.now` y `new Date` sin paréntesis. Para `crypto`
+//      esto importa más que para los demás: el límite nº9 prohíbe el azar INCLUSO CON SEMILLA,
+//      así que no hay forma atenuada que valga.
+// `globalThis` además es la puerta de atrás a todos los patrones del primer bloque: ninguno de
+// ellos casa con `globalThis.Date.now()`, `globalThis.Temporal.Now` ni
+// `globalThis.Intl.DateTimeFormat().resolvedOptions()`, porque en todos el receptor deja de
+// ser el identificador literal.
+//
+// NINGUNO ADMITE UNA FORMA LEGÍTIMA, y esto es deliberado, no un descuido. En estos cuatro
+// paquetes no hay un uso válido de los tres: la detección de capacidades no aplica (el runtime
+// está fijado por `engines` y el polyfill entra por import, no por sondeo);
+// `globalThis.Temporal ?? polyfill` —el patrón de `rrule-temporal`— es justo lo que ADR-018
+// descartó en "Alternativas consideradas"; el azar no tiene cabida por el límite nº9; y medir
+// tiempo con `performance` dentro de un paquete cuya salida debe ser función de su entrada no
+// mide nada que sirva. Que la lista de controles negativos de estos tres en
+// verificar-guardrail-nucleo.mjs no contenga ninguna forma permitida NO es un olvido.
+//
+// Lo que tocan de más, comprobado el 2026-07-30: un identificador o una clave de propiedad
+// escritos con ese nombre (`{ globalThis: 1 }`, `opciones.crypto`, `function f(performance)`).
+// Se acepta con el mismo criterio que `resolvedOptions` y por el contrario que `Now`: son
+// nombres que el runtime ya tiene tomados, no palabras que uno elija por casualidad en código
+// de jornadas y bloques. Si algún día molesta, es un renombrado, no un `biome-ignore`. NO
+// disparan la cadena `"crypto"` ni un identificador que solo los contenga (`esGlobalThis`),
+// que son los vecinos plausibles y están en el canario.
+//
+// LO QUE NINGUNO DE ESTOS PATRONES PUEDE VER. Queda escrito para que no se descubra como
+// sorpresa; las cinco formas se comprobaron una por una y NO disparan:
+//   1. acceso computado          `Temporal["Now"].instant()`, `fmt["resolvedOptions"]()`
+//   2. alias por identificador   `const T = Temporal; T.Now.instant()`
+//   3. receptor entre paréntesis `(performance as { now: () => number }).now()`
+//   4. el global `process`       `process.env.TZ` (zona ambiente), `process.hrtime.bigint()`,
+//                                `process.uptime()`
+//   5. el global `navigator`     `navigator.language` (locale ambiente)
+// Las tres primeras son inherentes a un patrón sintáctico: cerrarlas exige análisis de tipos,
+// que los plugins de Biome no hacen hoy, y ya las tenía `Date.now` desde la fase 0.
+// 4 y 5 son el resto del mismo eje que cierran `crypto` y `performance`, y NO se cerraron por
+// cuenta propia: `process` está excluido a propósito y por escrito de `IO_NATIVO` en
+// .dependency-cruiser.cjs, así que prohibir aquí el global contradiría una decisión escrita en
+// la herramienta hermana y merece decidirse aparte; y es el único de los cinco con un uso
+// legítimo imaginable (`process.env.CI` en un test). `navigator` es locale ambiente, la familia
+// de `resolvedOptions`, pero un receptor que ADR-018 §9 tampoco nombra. Cerrar cualquiera de
+// los dos es una línea en el segundo bloque el día que se apruebe.
+// El criterio no cambia — el guardrail hace imposible la forma cómoda, no el sabotaje deliberado.
+//
+// ALCANCE: `packages/{engine,temporal,domain,ical}`, declarado en el `overrides` de biome.json.
+// Los tres del núcleo entran por el límite nº1 (ausencia de I/O, determinismo del motor).
+// `ical` entra por una propiedad DISTINTA y con motivo propio: la reproducibilidad del `.ics`
+// (ADR-017). No está en el límite nº1 ni en la regla de I/O de dependency-cruiser; lo que se
+// le exige es que su salida sea función únicamente de su entrada, así que el `DTSTAMP` de cada
+// `VEVENT` sale del instante de la versión del plan y entra como parámetro, nunca del reloj.
+// Fuera de esos cuatro el reloj es legítimo — `apps/api` necesita la hora real para
+// materializar el `now` que el motor recibe como parámetro.
+//
+// Que este plugin siga viendo esos cuatro paquetes lo verifica
+// `scripts/verificar-guardrail-nucleo.mjs`: un `overrides.includes` que deja de casar no
+// produce ningún error de Biome, solo silencio verde.
+
+language js
+
+or {
+  or {
+    `Date.now`,
+    `Math.random`,
+    `new Date()`,
+    `new Date`,
+    `Temporal.Now`,
+    `$formateador.resolvedOptions`
+  } as $uso where {
+    register_diagnostic(span=$uso, message="Reloj, zona ambiente o azar en el núcleo: aquí `now` y la zona horaria entran siempre como parámetros. Sí están permitidos y no disparan: `new Date(argumento)`, `Math.max`, `Math.floor`, `Temporal.PlainDate.from(...)` y `new Intl.DateTimeFormat(locale, { timeZone })` con la zona explícita.", severity="error")
+  },
+  or {
+    `globalThis`,
+    `crypto`,
+    `performance`
+  } as $receptor where {
+    register_diagnostic(span=$receptor, message="Global de reloj o azar prohibido ENTERO en el núcleo, no solo el miembro que estés leyendo. Enumerar miembros deja huecos y ya los dejó: `crypto.randomUUID()` además de `crypto.getRandomValues()`, `performance.timeOrigin` además de `performance.now()`, y `globalThis.` delante de cualquiera de ellos. Ninguno de los tres tiene uso legítimo en estos cuatro paquetes: el azar está prohibido incluso con semilla y el reloj entra como parámetro. Si de verdad necesitas uno, es un ADR, no un `biome-ignore`.", severity="error")
+  }
+}

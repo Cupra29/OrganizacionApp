@@ -121,37 +121,342 @@ La fase de mayor densidad de bugs potenciales por línea de código.
 - `PlanningDay`: construcción de jornadas `[wake, nextWake)` desde perfil + excepciones.
 - Aritmética del sueño cruzando medianoche.
 - Álgebra de intervalos: unión, resta, solape, huecos.
-- Expansión de recurrencia: generador `RRULE` (subconjunto RFC 5545) y generador `CYCLE`.
-- Aplicación de excepciones ancladas por instante original.
-- Resolución de zona horaria con `timezone_overrides` y `anchor`.
-- **Guardrail de reloj y aleatoriedad — heredado de la fase 0, dueño: `engine-dev`.** La fase 0
-  dejó mecanizada la prohibición de I/O en el núcleo, pero **solo cubre imports**.
-  `Date.now()`, `new Date()` sin argumentos y `Math.random()` son globales, no módulos:
-  `dependency-cruiser` no puede verlos con ninguna configuración. Hace falta una regla de Biome
-  (`noRestrictedGlobals` o equivalente) sobre `packages/{engine,temporal,domain}`, enganchada a
-  `pnpm lint` y por tanto a `pnpm verify`. Entra aquí y no antes porque es ahora cuando hay
-  código que proteger.
+- Expansión de recurrencia **en dos etapas separadas** ([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md)):
+  - **Etapa 1 — conjunto de fechas**: `(regla, ventana) => PlainDate[]`. Sin zonas, sin
+    instantes, sin horario de verano. `RRULE` y `CYCLE` son dos implementaciones de esta misma
+    firma, así que los dos caminos de código que [ADR-005](./adr/ADR-005-recurrencia-y-excepciones.md)
+    admitía como coste son ambos triviales de fixturar.
+  - **Etapa 2 — resolución a instantes**: `(fecha, start_local, zonaRegla, anchor,
+    overridesZona) => intervalo absoluto`. **El único sitio del paquete donde existe una zona
+    horaria**, compartido por los dos generadores: la aritmética de cambio de horario se prueba
+    una vez, no dos.
 
-**Dependencia externa:** `@js-temporal/polyfill` o `Temporal` nativo si el runtime lo
-soporta; `rrule` para el subconjunto RFC 5545. **No** `moment`, **no** `date-fns` con zonas:
-la aritmética de zonas necesita una biblioteca que trate instante, fecha civil y zona como
-tipos distintos, que es justamente lo que evita la clase entera de errores de medianoche.
+    > **Corregida la firma el 2026-07-30.** Decía `(…, zona efectiva, anchor, overrides)`, que es
+    > redundante y además incorrecta: si la etapa 2 ya recibe la zona efectiva, los overrides
+    > sobran; y con `FIXED_ZONE` la zona efectiva **no debe consultarse en absoluto**. Lo correcto
+    > es recibir `zonaRegla` + `overridesZona` y **derivar dentro** la efectiva según el `anchor`,
+    > porque esa derivación es justamente lo único que distingue los tres valores: `FIXED_ZONE`
+    > ignora los overrides, `LOCAL_WHEREVER` los aplica, `SUSPEND_WHEN_AWAY` suprime la ocurrencia.
+    > Con la zona ya resuelta a la entrada, los tres serían indistinguibles. Verificado contra la
+    > implementación de `c718e06`.
+- Aplicación de excepciones ancladas por instante original, con **reporte de las que no casan
+  con ninguna instancia** — nunca descarte silencioso (ADR-018 §7).
+- Resolución de zona horaria con `timezone_overrides` y `anchor` (los tres valores).
+- Validador del subconjunto `RRULE`: acepta la tabla de ADR-018 §3 y **rechaza con error
+  explícito** todo lo demás, incluido `BYDAY` con prefijo numérico y `BYDAY` con
+  `MONTHLY`/`YEARLY`.
+- **Guardrail de reloj y aleatoriedad — heredado de la fase 0, dueño: `engine-dev`.**
+  ✅ **entregado el 2026-07-29.** La fase 0 dejó mecanizada la prohibición de I/O en el núcleo,
+  pero **solo cubre imports**. `Date.now()`, `new Date()` sin argumentos y `Math.random()` son
+  globales, no módulos: `dependency-cruiser` no puede verlos con ninguna configuración. Entra
+  aquí y no antes porque es ahora cuando hay código que proteger.
+
+**Orden dentro de la fase, decidido el 2026-07-29:** el guardrail va **primero**, antes de
+`PlanningDay` y de cualquier lógica temporal. La valla se pone antes que las ovejas: escrito al
+final, obliga a limpiar violaciones ya introducidas; escrito al principio, impide introducirlas.
+Es también el argumento que metió a `packages/ical` en el alcance siete fases antes de que ese
+paquete tenga una línea de código.
+
+### El guardrail, como quedó
+
+**Mecanismo: un plugin GritQL de Biome**, `scripts/biome/sin-reloj-ni-azar-en-nucleo.grit`,
+aplicado por `overrides` en `biome.json` y enganchado por tanto a `pnpm lint` y a `pnpm verify`.
+Casa contra cuatro formas sintácticas —`Date.now`, `Math.random`, `new Date()` y `new Date`
+suelto— y **no** dispara con `new Date(argumento)`, `Math.max` ni `Math.floor`. Los cuatro
+patrones no son redundantes: `new Date()` no casa con `new Date` y viceversa; hacen falta los
+dos para cubrir la llamada y la referencia.
+
+**`noRestrictedGlobals` no sirve, y este documento se equivocaba al nombrarla** (corregido el
+2026-07-29 tras comprobarlo). Esa regla restringe el identificador global entero y no admite
+forma sintáctica, así que es incapaz de la precisión que el propio plan exigía: prohibir `Date`
+mataría `new Date(instanteISO)` y prohibir `Math` mataría `Math.max` y `Math.floor`. Las tres
+son legítimas y aparecen constantemente en aritmética temporal, de modo que la regla obligaría
+a poner excepciones cada dos archivos — y un guardrail que se silencia deja de serlo al tercer
+mes. La precisión no es un lujo aquí: es la condición para que el guardrail sobreviva.
+
+**Alcance: `packages/{engine,temporal,domain,ical}`.** Los tres primeros por el determinismo del
+motor. `ical` por [ADR-017](./adr/ADR-017-determinismo-del-ics.md): el `.ics` de una versión de
+plan tiene que ser reproducible byte a byte, y `DTSTAMP` —obligatorio en cada `VEVENT`— es el
+sitio exacto por donde entraría el reloj. Fuera de esos cuatro el reloj es legítimo: `apps/api`
+es quien lo lee y materializa el `now` que el motor recibe como parámetro, y `apps/web` necesita
+la hora actual para pintar el calendario.
+
+**`pnpm guardrail:cobertura` — por qué existe.** El modo de fallo del guardrail es
+**silencioso**. Comprobado el 2026-07-29: con el `overrides.includes` apuntando a una ruta que
+no existe, `biome check` responde `Checked N files` y sale con código 0. Verde limpio,
+indistinguible de un run sano, con el núcleo entero sin proteger. El script escribe un canario
+en cada paquete del alcance con las formas prohibidas y las legítimas, y exige que las señaladas
+sean **exactamente** las prohibidas: verifica las dos direcciones, incluida la ausencia de
+falsos positivos. Es el mismo papel que `depcruise:cobertura` cumple para el grafo, y responde a
+la lección de la fase 0 — un guardrail que no se ha visto fallar es una intención.
+
+**Ampliación pendiente, descubierta el 2026-07-29 al decidir la dependencia temporal
+([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md) §9). Dueño: `engine-dev`.** Los
+cuatro patrones actuales no ven `Temporal.Now`, y `Temporal.Now.zonedDateTimeISO()` /
+`Temporal.Now.timeZoneId()` leen **el reloj y la zona ambiente a la vez** — el peor de los dos
+mundos, y el camino de menor resistencia para cualquiera que escriba aritmética temporal. La
+puerta se abre en el commit en que `packages/temporal` importe `Temporal`, es decir el siguiente.
+Hay que añadir al plugin: `Temporal.Now` (cualquier miembro),
+`Intl.DateTimeFormat().resolvedOptions().timeZone` y `performance.now`. La zona ambiente entra con
+el mismo argumento que el reloj: en el núcleo es siempre un parámetro. El alcance de paquetes no
+cambia, y los canarios de `guardrail:cobertura` crecen con las formas nuevas.
+
+**Dependencia externa — decidida el 2026-07-29, ver
+[ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md).** Este párrafo nombraba `rrule` y
+se contradecía: rechazaba `date-fns` con zonas porque *"la aritmética de zonas necesita una
+biblioteca que trate instante, fecha civil y zona como tipos distintos"*, y `rrule` **devuelve
+`Date`**, que es precisamente el tipo que no los distingue. Como queda:
+
+- **Una sola dependencia de producción: `temporal-polyfill@1.0.2`**, importada en un **único
+  módulo** (`packages/temporal/src/temporal.ts`) que reexporta `Temporal`. No
+  `@js-temporal/polyfill`: sigue en `0.5.1` (publicada el 2025-03-31, anterior al Stage 4 de
+  Temporal de marzo de 2026) y arrastra `jsbi`. El módulo único hace que cambiar de polyfill, o
+  pasar a `Temporal` nativo cuando llegue al LTS, sea una línea.
+- **Ninguna biblioteca de recurrencia en producción.** El subconjunto son cinco propiedades
+  (ADR-005 §1), `CYCLE` es código propio de todos modos, y lo que una biblioteca de `RRULE`
+  aportaría está confinado a la etapa 1, que es la mitad **sin** dificultad horaria. `rrule`
+  además introduce una frontera `Date`↔`Temporal` cuya corrección depende de `process.env.TZ`:
+  invisible para `dependency-cruiser` (no hay import), invisible para el guardrail
+  (`new Date(argumento)` está permitido a propósito) y **enmascarada por un CI en UTC**.
+- **`rrule-temporal@2.0.2` como `devDependency`: oráculo diferencial.** Es una segunda
+  implementación independiente contra la que comparar el conjunto de fechas, incluidas semanas de
+  cambio de horario. Así se compran los veinte años de casos límite del ecosistema sin poner una
+  biblioteca en el camino de producción. Fuera de producción porque hoy, en Node 24, empaqueta su
+  **propia** copia de `Temporal` y sus objetos no interoperan con los nuestros.
+- Sigue en pie: **no** `moment`, **no** `date-fns` con zonas.
 
 **Criterio de aceptación**
-- Un turno rotativo 4×3 anclado el 2026-08-03 expande correctamente 8 semanas, y las semanas
-  civiles resultantes **son distintas entre sí**.
-- Una jornada que cruza un cambio de horario mide 23 h o 25 h reales, no 24.
+
+> **Zonas de referencia — no son intercambiables.** Cada criterio de abajo nombra su zona a
+> propósito; ver [07 §4.E](./07-convenciones-propuestas.md) para la tabla y el motivo.
+> `America/Mexico_City`, que es la zona de ejemplo en 02, 04 y ADR-003, **no sirve para ninguna
+> fixture de cambio de horario**: México suprimió el horario de verano en 2022 y su tzdata no
+> tiene transiciones futuras, así que un test de 02:30 ambiguo escrito con ella pasaría en verde
+> **con un motor que no implemente `disambiguation` en absoluto**. Sí es la zona correcta para
+> aislar la aritmética de medianoche del DST, que son dos bugs distintos.
+
+> **Tres fixtures de `CYCLE`, una por régimen.** El periodo en semanas de un ciclo de `L` días es
+> `L / mcd(L, 7)`, y ese número —no "alineado o no"— es lo que decide qué prueba cada una. Lo que
+> refuta la semana plantilla ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3)
+> es **periodo ≥ 2**. Las tres se anclan el 2026-08-03, que es lunes.
+>
+> | Fixture | `L` | Periodo | Qué prueba |
+> |---|---|---|---|
+> | 4×3 | 7 | **1** | El caso que nombra el brief. **No** refuta la semana plantilla |
+> | **2-2-3** | **14** | **2** | **El turno real del usuario** (Q13). Alternancia A/B |
+> | 4 on / 4 off | 8 | **8** | Deriva máxima. Carga la aserción fuerte |
+
+- **El turno real (Q13): 2-2-3 con ciclo de 14 días.** Anclado el 2026-08-03 produce exactamente
+  dos patrones civiles que alternan — semanas impares `{L,M,V,S,D}`, semanas pares `{X,J}` — y la
+  semana 3 es idéntica a la 1. **La trampa que este caso caza y ningún otro:** 14 es múltiplo de 7,
+  así que una implementación que redujera el ciclo módulo 7 lo colapsaría a un patrón semanal único
+  y daría un resultado **equivocado pero plausible**. Con `L=8` el mismo bug es obvio; con `L=14`
+  no.
+- **Aserción fuerte, con ciclo de 8 días** (4 de trabajo / 4 de descanso): 8 semanas civiles
+  **distintas entre sí** y la **semana 9 igual que la 1**. Es el ciclo con el que la aserción es
+  máxima —el patrón avanza un día de la semana por ciclo, así que el periodo es exactamente 8—.
+  **Los 8 días son una elección de prueba, no el turno de nadie**, y por eso este criterio no se
+  tocó cuando llegó el dato real.
+- Un turno rotativo **4×3** (ciclo de 7 días) anclado el 2026-08-03 expande correctamente 8
+  semanas. Se conserva porque es el caso que nombra el brief, pero **no demuestra nada sobre la
+  semana plantilla**: su periodo es 1 y sus ocho semanas son idénticas por construcción.
+
+  > **Corregido el 2026-07-29** al contrastar los candidatos de expansión contra este criterio
+  > ([ADR-018](./adr/ADR-018-expansion-de-recurrencia-sin-rrule.md)). El criterio pedía semanas
+  > civiles distintas **de un 4×3, y eso es insatisfacible**: 4 + 3 = 7, así que el ciclo está
+  > alineado con la semana civil y las ocho semanas salen **idénticas** con cualquier ancla. La
+  > fixture de ADR-005 y [02 §4.1](./02-modelo-de-datos.md) usa `cycleLengthDays: 7` y por tanto
+  > nunca habría podido pasar. Lo que el criterio quería probar —que el modelo **no** es una
+  > semana plantilla ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3)—
+  > necesita **periodo ≥ 2**. Con 8 días, el patrón avanza un día de la semana por ciclo y el
+  > periodo es exactamente 8 semanas: se obtienen las ocho distintas **y** un falsificador (la 9ª
+  > repite la 1ª) que un expansor que devuelva ruido no puede satisfacer.
+  >
+  > *(Aquella nota decía "necesita un ciclo no múltiplo de 7". También era inexacto, aunque nadie
+  > lo notó entonces: un ciclo de 14 días es múltiplo de 7 y tiene periodo 2, así que sirve. La
+  > condición es sobre el periodo, no sobre la divisibilidad.)*
+  > **Segunda corrección, 2026-07-30.** El 29 se anotó aquí que Q13 había confirmado un turno
+  > "desalineado" y que por eso la fixture de 8 días pasaba a ser la representativa. **El dato
+  > exacto llegó después y lo desmintió**: el turno real es un **2-2-3 de 14 días**, que está
+  > enganchado a la semana civil con periodo 2, no desfasado. La fixture de 8 días **se queda
+  > igual** —cargaba la aserción fuerte y estaba escrita como elección de prueba, no como dato del
+  > usuario— y entra el 2-2-3 como tercer caso. Lo que sí cambia es el patrón de la demo de la
+  > fase 3. Detalle del error de encuadre en **Q13**.
+- Una jornada que cruza un cambio de horario mide 23 h o 25 h reales, no 24. **Con
+  `America/Chicago`**: la jornada del 2026-03-07 (wake 07:00, sleep 23:00) mide **1380 min** y la
+  del 2026-10-31 mide **1500 min**, comparadas contra instantes UTC exactos.
+- **Un turno de 720 min que empieza a las 19:00 de la noche ANTERIOR a la transición termina a
+  las 08:00 locales, no a las 07:00.** Con `America/Chicago` y el adelanto del 2026-03-08:
+  inicio `2026-03-08T01:00:00Z`, fin `2026-03-08T13:00:00Z`, que es 08:00 CDT. La duración son
+  minutos reales sobre la línea de instantes, no hora de pared (ADR-018 §4).
+
+  > **Corregido el 2026-07-29** tras la auditoría de `qa-engineer`
+  > ([`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md) §2, hallazgo 4). Este
+  > criterio decía *"que empieza a las 19:00 **el día** del cambio de horario"*, y así era
+  > **satisfacible por accidente**: en cualquier regla real la transición ocurre de madrugada, así
+  > que un turno que arranca a las 19:00 de ese mismo día ya la ha dejado atrás y no cruza nada.
+  > Terminaba a las 07:00 — exactamente lo que da la suma ingenua de 12 h en hora de pared —, así
+  > que el criterio no distinguía una implementación correcta de una que ignora el DST por
+  > completo. La noche anterior sí lo distingue: 08:00 frente a 07:00.
+- Una regla `FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR;COUNT=8` con `anchor_date = 2026-08-05`
+  (miércoles) produce **exactamente** este conjunto, en este orden: `2026-08-05, 2026-08-07,
+  2026-08-17, 2026-08-19, 2026-08-21, 2026-08-31, 2026-09-02, 2026-09-04`. Nótese que el lunes
+  2026-08-03 **no** está: es de la semana activa del ancla pero anterior al ancla. Las semanas
+  activas se cuentan desde la semana del ancla con `WKST=MO`, no sumando 14 días a cada
+  ocurrencia, y `COUNT` corta el conjunto ya fusionado en orden cronológico. Son los dos errores
+  clásicos de una implementación propia (ADR-018 §5) y el caso donde el oráculo diferencial gana
+  su sitio.
+
+  > **Concretado el 2026-07-29** (misma auditoría, hallazgo 2). El criterio describía el mecanismo
+  > correcto pero no fijaba ancla, `COUNT` ni conjunto esperado: **cualquier salida lo "pasaba"**
+  > por no haber nada contra lo que compararla. Un criterio sin poder discriminante es del mismo
+  > tipo de defecto que el 4×3 insatisfacible, solo que por omisión de datos.
+- **Con `Europe/Madrid`** y `start_local = 02:30`: la ocurrencia del **2026-03-29** (adelanto)
+  resuelve a `2026-03-29T01:30:00Z` (03:30 CEST — desplazada adelante los 60 min del hueco) y la
+  del **2026-10-25** (atraso) a `2026-10-25T00:30:00Z`, que es la **primera** de las dos 02:30, no
+  `01:30:00Z`. `disambiguation: 'compatible'`, y ninguna de las dos falla.
+
+  > **Corregido el 2026-07-29** (misma auditoría, hallazgo 3). El criterio usaba la misma hora
+  > nominal —02:30— para el adelanto y el atraso **sin nombrar zona**, y eso solo es cierto donde
+  > la transición ocurre a la 01:00 UTC en los dos sentidos, como en la UE: ahí el hueco y el
+  > pliegue caen los dos en la franja local 02:00–02:59. Con una regla estadounidense
+  > (`America/Chicago`) el hueco cae en 02:00–02:59 pero el pliegue en 01:00–01:59, así que "02:30
+  > en el día de atraso" sería una hora de invierno perfectamente normal y **la mitad del criterio
+  > no ejercitaría nada**. La zona no era un detalle de la fixture: era parte del criterio.
+- El validador **rechaza cada fila de la columna "Rechazado" de ADR-018 §3**, un caso por forma y
+  con un error que nombra la propiedad exacta. Los que más fácilmente se olvidan por no ser
+  obvios: `FREQ=YEARLY;BYDAY=MO` (no solo `MONTHLY`), `COUNT` y `UNTIL` juntos, `UNTIL` como fecha
+  civil sin zona, `BYDAY=-1FR` (el signo no es una vía de escape) e `INTERVAL` igual a `0`, `-1` o
+  `1.5`. Y **`anchor_date` que no pertenece al conjunto que la regla genera** se rechaza en vez de
+  corregirse sola al día más cercano (ADR-018 §6, que existe precisamente para eliminar la
+  ambigüedad del `DTSTART` no sincronizado).
+- `FREQ=MONTHLY` con `anchor_date = 2026-01-31` y `COUNT=4` produce `2026-01-31, 2026-03-31,
+  2026-05-31, 2026-07-31`: febrero y abril **se omiten**, no se recortan al último día del mes
+  (RFC 5545 §3.3.10).
+- `effective_until = 2026-08-17` (lunes) **incluye** la ocurrencia de ese mismo día; y cuando la
+  regla trae además `UNTIL`, manda el más restrictivo de los dos, probado en las dos direcciones.
+- **`UNTIL` se reduce a fecha civil antes de entrar en la etapa 1, y la reducción es exacta.** Con
+  `UNTIL = 2026-08-17T14:00Z` y la ocurrencia de ese día a las 15:00Z, el límite es **`2026-08-16`**,
+  no `08-17`. Truncar `UNTIL` a su día civil admitiría una ocurrencia **posterior a `UNTIL`**, que
+  es el error que cualquiera comete. Segundo caso, con la otra trampa: el día civil de `UNTIL` se
+  calcula **en la zona de la regla, no en UTC** — con una zona lejana de UTC los dos difieren.
+- **El corpus del oráculo diferencial declara su dominio.** Dos divergencias de `rrule-temporal`
+  están fijadas **como esperadas**, no excluidas en silencio: acepta ancla no sincronizada (ADR-018
+  §6 la rechaza) y recorta en vez de omitir, arrastrando el día recortado (`MONTHLY` desde el 31 de
+  enero le da `01-31, 02-28, 03-28, 04-28`; a nosotros `01-31, 03-31, 05-31, 07-31`). Cada
+  exclusión lleva su motivo escrito y un test propio que fija **nuestra** respuesta.
 - Un cronotipo con pico 22:00–01:00 produce una franja `PEAK` contigua que atraviesa
-  medianoche, sin partirse en dos.
+  medianoche, sin partirse en dos. **Verificación mecánica**: el instante de la medianoche local
+  no aparece en la estructura devuelta ni como frontera entre dos entradas del mismo `tier` ni
+  como dos entradas separadas — "contigua" tiene que ser comprobable, no visual.
 - Una excepción creada antes de un cambio de horario sigue apuntando a la instancia correcta
   después.
-- Property test: `∀ jornada: sueño + vigilia == nextWake − wake`, exacto al minuto.
+- **Álgebra de intervalos, con la semántica semiabierta `[inicio, fin)` que usa la constraint de
+  exclusión de [02 §6.2](./02-modelo-de-datos.md)**: dos intervalos contiguos **no** se solapan
+  (`[09,10)` y `[10,11)` → `false`); unir solapados y contiguos colapsa a uno; restar produce los
+  huecos **sin emitir huecos de duración cero** cuando lo ocupado toca exactamente `wake` o
+  `sleep`; un intervalo degenerado (duración 0, que una excepción `OVERRIDE` con
+  `new_duration_minutes = 0` produce legítimamente) no ocupa tiempo ni genera hueco espurio. Si el
+  motor y la base de datos discrepan en qué es un solape, la garantía de cero solapes se cae por
+  el lado que nadie está mirando.
+- **Los tres valores de `anchor` contra una ventana de `timezone_overrides` activa**, con un viaje
+  a `Europe/Madrid`: `SUSPEND_WHEN_AWAY` → la ocurrencia **está ausente** de la salida, no movida
+  ni marcada como cancelada; `FIXED_ZONE` → mismo instante UTC que sin viaje, sin consultar los
+  overrides; `LOCAL_WHEREVER` → misma hora de pared en la zona del override. Más una propiedad:
+  **ninguna combinación de overrides produce un cuarto comportamiento**.
+- **Una excepción cuyo `recurrence_id` no casa con ninguna instancia se reporta en un campo
+  explícito de la salida** y la ocurrencia real se genera con normalidad. No se aplica por
+  proximidad, no lanza, no desaparece. Dos variantes: una huérfana por offset equivocado (`08:00Z`
+  donde la instancia real es `07:00Z`) y una que nunca correspondió a nada (un martes en una regla
+  de lunes). Es la garantía textual de ADR-018 §7.
+
+  > **Tres criterios nuevos, añadidos el 2026-07-29** tras la auditoría de `qa-engineer`
+  > (hallazgos 5 y 6 y punto 3 de su §4). No eran criterios mal redactados: **eran tres entregas
+  > comprometidas en el párrafo de arriba sin una sola línea que las cubriera**. Se podía entregar
+  > `packages/temporal` sin una prueba de unión, resta ni solape, sin ejercitar ninguno de los tres
+  > valores de `anchor` —que ADR-003 trata como puerta de una sola dirección— y sin verificar el
+  > "nunca descarte silencioso" que ADR-018 §7 exige, y aun así satisfacer el criterio completo.
+  > Casos con valores exactos en [`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md)
+  > §3.3, §3.6 y §3.7.
+- **Property test 1 — las jornadas embaldosan la línea de tiempo:**
+  `∀ i: jornada[i].wakeSig == jornada[i+1].wake` (instante exacto), y
+  `jornada.wake < jornada.sleep <= jornada.wakeSig`. Falla si hay un minuto que pertenece a dos
+  jornadas o a ninguna, y **falla también con una jornada degenerada**
+  (`wake == sleep == wakeSig`).
+
+  > **`<=`, no `<`, corregido el 2026-07-30.** Escribí `sleep < wakeSig` estricto y **es falso**,
+  > con fixture delante: viajando al **este**, la hora local de acostarse puede caer después del
+  > despertar siguiente, y la igualdad es el caso real de la noche perdida (México → Madrid con
+  > sueño de 8 h da `sueño = 0` exacto). Lo que impide que `sleep` se pase de `wakeSig` es ahora un
+  > acotado explícito en la construcción, que existe porque sin él el intervalo `[wake, sleep)`
+  > **invade la jornada siguiente y la capacidad se cuenta dos veces**. Ver 03 §3.1.
+- **Property test 2 — la duración de la jornada es 1440 min menos el salto de offset:**
+  para un horario local fijo, `∀ jornada: wakeSig − wake == 1440 − (offsetMin(wakeSig) −
+  offsetMin(wake))`, sobre 365 días consecutivos en `America/Chicago`, `Europe/Madrid`,
+  `Australia/Lord_Howe` (transición de **30 min**) y `America/Mexico_City` (sin DST). Falla si la
+  jornada siguiente se calcula sumando 1440 minutos en la línea de instantes en vez de un día de
+  calendario.
+- Property test 3: `∀ jornada: vigilia >= 0 ∧ sueño >= 0`. Es el suelo, no el techo: lo
+  interesante son las dos de arriba. Con el acotado de 03 §3.1 `sueño >= 0` es cierto **por
+  construcción**, así que este test vigila el acotado, no la aritmética.
+- **Viaje transmeridiano hacia el este, con valores exactos y con fecha.** Origen
+  `America/Mexico_City` (UTC−6 todo el año), `wake 07:00`, `sleep 23:00` — vigilia declarada 960
+  min — con override que empieza en `d+1`. **El salto depende de la fecha, así que cada fila lleva
+  la suya:**
+
+  | `d` | Destino | Offset destino | Salto | Jornada | `sueño` | `recorteVigilia` |
+  |---|---|---|---|---|---|---|
+  | 2026-08-03 | `Europe/Madrid` | +02:00 (CEST) | 8 h | 960 min | **0** | 0 |
+  | 2026-01-05 | `Europe/Madrid` | +01:00 (CET) | 7 h | 1020 min | **60** | 0 |
+  | 2026-08-03 | `Australia/Lord_Howe` | +10:30 (invierno austral) | 16,5 h | 450 min | 0 | **510** |
+  | 2026-01-05 | `Australia/Lord_Howe` | +11:00 (verano austral) | 17 h | 420 min | 0 | **540** |
+
+  En los cuatro casos **el embaldosado se mantiene** y **ningún minuto pertenece a dos jornadas**:
+  es el criterio que importa, porque el síntoma visible (sueño negativo) escondía un solape de
+  capacidad. Las dos filas de cada destino son la misma prueba en las dos temporadas y **las dos
+  van a la suite**: son lo que impide que alguien transcriba un solo número y lo dé por universal.
+
+  > **Corregido el 2026-07-30.** Este criterio daba un único valor por destino —`sueño = 0` para
+  > Madrid y `recorteVigilia = 540` para Lord Howe— **sin fecha**, y ninguno de los dos es
+  > universal: en enero Madrid está en CET y el sueño es 60, no 0; en agosto Lord Howe está en
+  > +10:30 y el recorte es 510, no 540. Lo detectó `engine-dev` al implementar, porque su fixture
+  > estaba fechada en agosto y no cuadraba con el número del documento — **y paró en vez de ajustar
+  > el número**, que es lo correcto y lo que evitó que el documento ganara la discusión contra la
+  > realidad.
+- **`recorteVigilia == 0` en toda jornada que no cruza un salto de huso.** Si es distinto de cero
+  sin override de por medio, hay un bug en el acotado o en `zonaEfectivaEn`.
+- Hacia el **oeste** no hay recorte: la jornada se alarga, `sueño` crece y la vigilia no cambia.
+- **Una jornada de sueño cero dispara `prohibeFocoNocturno` y `techoEnergía`** igual que cualquier
+  otro déficit. **No** produce `INFEASIBLE`: el usuario cogió un vuelo, no hay nada imposible que
+  declarar.
+- **`zonaEfectivaEn(d, …)` se resuelve por el inicio del día civil `d` en la zona base**, y es
+  función pura de `d`. Test: la zona que resuelve `wakeSig` de la jornada `d` y la que resuelve
+  `wake` de la jornada `d+1` son **la misma llamada**, no dos que coinciden por cuidado.
+
+  > **Sustituyen a un criterio tautológico, corregido el 2026-07-29** tras la auditoría de
+  > `qa-engineer` ([`docs/qa/fase-1-nucleo-temporal.md`](../qa/fase-1-nucleo-temporal.md) §2,
+  > hallazgo 1). Decía: *"`∀ jornada: sueño + vigilia == nextWake − wake`, exacto al minuto"*. Como
+  > [ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) **define** sueño y vigilia como
+  > `nextWake − sleep` y `sleep − wake`, la suma es `nextWake − wake` **por álgebra, para tres
+  > instantes cualesquiera**: la satisface un motor con un desfase de una hora por DST, uno que
+  > ignora la zona, y una jornada de longitud cero. Era el único *property test* declarado de la
+  > fase y **no podía fallar** — el defecto simétrico del 4×3 insatisfacible.
+  >
+  > Las tres de arriba tienen contenido. La primera es la que **de verdad** afirma ADR-003 regla 1
+  > y nadie había escrito: que `[wake, nextWake)` **particiona** la línea de tiempo, sin huecos ni
+  > solapes. Si se rompe, la capacidad se cuenta dos veces o se pierde, que es el fallo más caro
+  > posible en F1. La segunda convierte el criterio de 23 h/25 h de dos fechas elegidas a mano en
+  > una propiedad sobre todo el año y todas las zonas, incluidas las de salto de media hora. No es
+  > un oráculo independiente —usa los offsets del mismo polyfill—, y por eso las fixtures de valor
+  > exacto siguen siendo necesarias; pero discrimina el bug principal.
 - Cobertura de ramas ≥ 95 % en este paquete (el único con umbral obligatorio). Se declara como
   umbral por glob en el `vitest.config.ts` **raíz**: en Vitest 4 la cobertura es configuración
   de raíz, no de proyecto.
-- **Un `Date.now()` escrito a propósito dentro de `packages/temporal` rompe `pnpm verify`.** Se
-  comprueba igual que la frontera de la fase 0: añadiéndolo una vez y viendo fallar. Un
-  guardrail que no se ha visto fallar es una intención — es la lección que dejó la fase 0.
+- **Un `Date.now()` escrito a propósito dentro de `packages/temporal` rompe `pnpm verify`.** ✅
+  Cumplido, y de forma más fuerte de lo que pedía el criterio: en vez de una prueba manual de
+  una sola vez, `pnpm guardrail:cobertura` inyecta el canario y comprueba las dos direcciones
+  **en cada ejecución**. Un guardrail que no se ha visto fallar es una intención — es la
+  lección que dejó la fase 0.
 
 **Desbloquea** el motor y la persistencia de recurrencias.
 
@@ -189,15 +494,51 @@ tipos distintos, que es justamente lo que evita la clase entera de errores de me
   depurar el motor sin interfaz.
 
 **Criterio de aceptación**
-- **Ya hay valor demostrable sin plan.** Con un fixture de enfermera con turnos 4×3, el
-  diagnóstico dice cuántas horas asignables tiene realmente por semana y qué porcentaje de su
-  franja pico está ocupada. Se puede enseñar a un usuario y que le resulte útil.
+- **Ya hay valor demostrable sin plan.** Con el fixture de enfermera con **turno 2-2-3 de ciclo de
+  14 días** —el turno real de Q13—, el diagnóstico dice cuántas horas asignables tiene realmente
+  **cada semana** —que no son las mismas dos semanas seguidas: la semana `{L,M,V,S,D}` y la
+  `{X,J}` dan cifras distintas— y qué porcentaje de su franja pico está ocupada. Se puede enseñar a
+  un usuario y que le resulte útil.
+
+  > **Corregido dos veces, y la segunda por el dato real.** El 2026-07-29 este criterio decía
+  > "turnos 4×3": ciclo de 7 días, **periodo 1**, ocho semanas idénticas. Siendo la primera cosa
+  > que el proyecto enseña, habría presentado como logro justo lo que un calendario semanal
+  > ordinario también sabe hacer. Se cambió entonces a "ciclo desalineado" por una lectura de Q13
+  > que resultó equivocada; el **2026-07-30** llegó el dato exacto y la demo pasa al **2-2-3 de 14
+  > días**, que es **periodo 2**.
+  >
+  > **Por qué el turno real y no el de 8 días, que impresiona más.** Esta demo existe para enseñar
+  > el **diagnóstico** —horas asignables y ocupación del pico—, no para probar el modelo temporal;
+  > eso lo prueban los criterios de la fase 1. Y para convencer a una persona, su propio turno vale
+  > más que uno sintético. Periodo 2 basta para lo único que la demo necesita afirmar: **que no hay
+  > una semana tipo**, que es la propiedad que sostiene todo el diseño
+  > ([ADR-003](./adr/ADR-003-modelo-temporal-y-zonas-horarias.md) regla 3). Lo que ya **no** puede
+  > decir esta demo es "ocho semanas distintas".
 - El fixture 09 (madrugador) produce la misma estructura de capacidad que el 08 (nocturno)
   con las franjas espejadas. **Test antisesgo**: si difieren, hay un `if` que favorece a un
   cronotipo.
 - Un día con déficit de sueño queda marcado con `prohibeFocoNocturno` y `techoEnergía`.
-- Un compromiso `HIGH` con arrastre de 90 min degrada la energía del hueco siguiente, y sin
-  el arrastre no lo hace.
+- **Una tarde libre con pico 22:00–01:00 produce UN hueco con TRES segmentos de energía**
+  (`NEUTRAL → PEAK → NEUTRAL`), no tres huecos ni un hueco con un `tier` único. El perfil es una
+  partición exacta del hueco: contigua, sin solapes, sin segmentos de duración cero. **Y la
+  medianoche local no aparece como frontera de segmento**, porque `22:00–01:00` es una sola franja
+  (03 §3.2).
+- **`FRAGMENTATION_RISK` no sube por segmentar.** El mismo fixture, con y sin franja de pico
+  declarada, da el **mismo** valor de fragmentación: la métrica cuenta huecos, no segmentos. Un día
+  entero con tres niveles de energía no está fragmentado — nada lo interrumpe.
+- Un compromiso `HIGH` con arrastre de 90 min deja en **`LOW`** —no en `NEUTRAL`— **solo los
+  primeros 90 minutos** del hueco siguiente, no el hueco completo. Un hueco de cuatro horas que
+  empieza un minuto antes de que expire el arrastre conserva `PEAK` en 3 h 59 min. Sin arrastre
+  declarado, no degrada nada.
+- **El arrastre no se compone:** dos compromisos `HIGH` con ventanas de arrastre **solapadas** dan
+  exactamente el mismo perfil que uno solo (`LOW`), y **tres también**. Nunca aparece `SIN_FOCO`
+  por acumulación de arrastres — ese nivel solo lo produce un `capacity_modifier` `NONE` declarado
+  por el usuario. Test adicional: **permutar el orden de los compromisos en la entrada no cambia
+  ni un segmento del perfil**, porque `tierEn` es un ínfimo de cotas independientes (03 §3.2).
+- Un `capacity_modifier` `NONE` de 30 min dentro de un hueco de cuatro horas descuenta **30
+  minutos** de `assignableMinutes`, no cuatro horas, y **el tiempo sigue siendo colocable para
+  bloques que no requieren foco** — no es indisponibilidad
+  ([ADR-011](./adr/ADR-011-privacidad-por-diseno.md) §2 separa las dos cosas).
 
 **Desbloquea** la fase 4 y —esto es lo importante— **una demo con valor real**. Si hubiera que
 cortar el proyecto aquí, lo entregado ya resuelve la causa nº3 del brief.
@@ -230,6 +571,27 @@ La fase de mayor riesgo técnico.
   un sacrificio `BELOW_LONG_BLOCK` que lo explique. Nunca fragmentos diarios.
 - Fixture 19: con 10+ objetivos, el corte se produce donde predice [ADR-015] (por escasez de
   plazas de colocación, no por el filtro de presupuesto).
+- **El cronotipo se cumple de verdad, y esto es nuevo:** un bloque de foco de 90 min en una tarde
+  libre de cuatro horas con pico de 22:00 a 01:00 **se coloca dentro del pico**, no al principio
+  del hueco. Sale de la puntuación —media ponderada por minutos sobre los segmentos que el bloque
+  toca— y no de una regla nueva (03 §5.3). Espejado a un pico de 05:00–08:00, el resultado es
+  equivalente: sigue siendo el test antisesgo.
+- **Un pico de 45 min no se pierde**: un bloque de 90 min se coloca a caballo y cobra por los 45
+  minutos de pico que cubre. Es el caso que un troceo del hueco habría vuelto incolocable, y por el
+  que se descartó trocear.
+- **El número de plazas de colocación es el mismo que predice [ADR-015]** aunque los huecos tengan
+  perfil segmentado: las restricciones duras nº 1 y nº 2 siguen midiendo el **hueco**, no el
+  segmento. Si este criterio falla, el tope emergente se ha movido y ADR-015 necesita revisión.
+- **Los seis pesos `W_*` y la tabla `valor` de [03 §5.3](./03-motor-de-planificacion.md) llegan por
+  `EngineInput.params`.** Test: la función de puntuación **no contiene ningún número literal**. Es
+  el límite nº 5 de `CLAUDE.md` aplicado al sitio donde más se incumple hoy, y es deuda
+  **preexistente** anotada el 2026-07-29 — no la introduce la segmentación, pero la segmentación le
+  sube el apalancamiento: `valor` pasa de ordenar huecos entre sí a ser el peso de una media
+  ponderada que decide **dónde** dentro del hueco cae el bloque.
+- **Al calibrar esos pesos, un ADR nuevo que los fije con su análisis numérico**, al estilo de
+  ADR-015 y sin editarlo (no los menciona, así que no hay contradicción que reemplazar). Sin ese
+  ADR, los valores quedan como los eligió quien escribió la función y nadie sabrá por qué `PEAK`
+  vale 3 y no 5 — que es exactamente la situación que ADR-015 existió para evitar con la fricción.
 - La tasa de fallo del validador sobre los 1000 casos generados es **cero**.
 - El motor resuelve una ventana de 14 días con 6 objetivos y 40 compromisos en < 500 ms.
 
@@ -326,13 +688,27 @@ la que las fases están separadas así.
 - Revisión semanal con métricas del brief y propuestas de recalibración.
 - Trabajo programado de detección de compromisos expirados.
 - `GET /me/export` y `DELETE /me`.
+- **Los campos de identidad de versión del `VEVENT`.** `DTSTAMP`, `LAST-MODIFIED` y `CREATED`
+  salen del instante de creación de la versión del plan, nunca del reloj
+  ([ADR-017](./adr/ADR-017-determinismo-del-ics.md)); el guardrail de la fase 1 ya lo impone
+  sobre `packages/ical`. **`SEQUENCE` queda por decidir aquí**, y hay que decidirlo a
+  conciencia: algunos clientes lo miran para aceptar una actualización, y su valor correcto
+  depende de la clasificación por bloque que produce el diff de la fase 5 (`UNCHANGED` /
+  `MOVED`). Se anota para que sea una elección y no un descubrimiento a mitad de fase.
 
 **Criterio de aceptación**
 - El `.ics` se suscribe correctamente en Google Calendar y Apple Calendar (prueba manual con
   ambos, es donde aparecen las incompatibilidades reales).
 - Un bloque que se mueve entre versiones **se actualiza** en el cliente de calendario en vez
   de duplicarse. Prueba manual: es el fallo más común de los feeds `.ics` y el que hace que
-  la gente se dé de baja.
+  la gente se dé de baja. **Lo que se verifica aquí es el `UID`**, que es lo que decide la
+  deduplicación (`UID` = `lineageId` + dominio, [ADR-008](./adr/ADR-008-sincronizacion-calendarios.md));
+  es decir, este criterio prueba el linaje de [ADR-006](./adr/ADR-006-versionado-de-plan-y-diff.md).
+  `DTSTAMP` no interviene en la deduplicación y mirarlo aquí sería probar la cosa equivocada.
+- **Dos solicitudes del mismo feed sin replanificación de por medio devuelven el mismo cuerpo
+  byte a byte**, y la segunda con `If-None-Match` responde `304`. Es el test de que el `ETag`
+  prometido en [04 §8](./04-contratos-api.md) sirve para algo y de que el `.ics` no lleva
+  reloj dentro.
 - El feed no incluye bloques `FIXED` ni `TRANSITION`.
 - `DELETE /me` deja el feed devolviendo `404`. Test de integración dedicado.
 - La revisión semanal muestra cosas cerradas y dispersión **antes** que cualquier dato de
@@ -393,8 +769,11 @@ la que las fases están separadas así.
 - **Nada de aleatoriedad en el motor**, ni siquiera con semilla. El desempate es un orden
   total explícito. Un motor con aleatoriedad sembrada sigue siendo sensible a reordenamientos
   de la entrada, y P10 lo destaparía.
-- **Nada de `Date.now()`** dentro de `engine` ni `temporal`. Un test de arquitectura lo
-  verifica.
+- **Nada de `Date.now()`, `new Date()` sin argumentos ni `Math.random()`** dentro de
+  `engine`, `temporal`, `domain` ni `ical`. No es un test de arquitectura sino un plugin
+  GritQL de Biome enganchado a `pnpm lint`, más `pnpm guardrail:cobertura`, que verifica que
+  el plugin sigue viendo los cuatro paquetes y que no da falsos positivos sobre
+  `new Date(argumento)`, `Math.max` ni `Math.floor`. Detalle en la fase 1.
 
 ### Cómo se testea el motor de forma determinista, en concreto
 
@@ -414,8 +793,13 @@ Tres mecanismos que se refuerzan entre sí:
 
 Límites que no se cruzan sin un ADR nuevo:
 
-1. **`packages/engine` y `packages/temporal` no tienen dependencias de I/O.** Ni base de
-   datos, ni HTTP, ni sistema de archivos, ni reloj.
+1. **`packages/engine`, `packages/temporal` y `packages/domain` no tienen dependencias de
+   I/O.** Ni base de datos, ni HTTP, ni sistema de archivos, ni reloj. Son dos mecanizaciones
+   distintas y conviene no confundirlas: `dependency-cruiser` cubre el I/O **importado**, y el
+   plugin GritQL de la fase 1 cubre el reloj y el azar, que son globales y no imports. El
+   segundo alcanza además a **`packages/ical`**, que no es I/O-libre por la misma razón sino
+   por [ADR-017](./adr/ADR-017-determinismo-del-ics.md): su salida tiene que ser reproducible
+   byte a byte.
 2. **El validador no importa nada del colocador.** La duplicación es deliberada.
 3. **No se añade ningún campo que registre, insinúe o permita inferir información médica.**
    Ante la duda, la respuesta es no. Ver [ADR-011](./adr/ADR-011-privacidad-por-diseno.md).
