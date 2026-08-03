@@ -5,11 +5,18 @@ Instrucciones específicas de este proyecto. Se fusionan con las guías genéric
 
 Aplicado desde [`docs/arquitectura/07-convenciones-propuestas.md`](docs/arquitectura/07-convenciones-propuestas.md).
 
-> **Estado del repo:** fase 0 cerrada el 2026-07-29. El andamiaje existe y funciona: monorepo
-> pnpm con los 7 paquetes, TypeScript, Biome, Vitest, `dependency-cruiser` y CI en GitHub
-> Actions, con la frontera del motor verificada en las dos mitades (paquetes npm y built-ins de
-> Node). Los paquetes están **vacíos a propósito**: solo una constante `PACKAGE_ID` de
-> andamiaje y su test de humo, que se borran en la fase que dé contenido a cada uno.
+> **Estado del repo:** fase 0 cerrada el 2026-07-29, **fase 1 cerrada el 2026-07-31**.
+>
+> - **`packages/temporal` tiene contenido real**: jornadas, resolución a instantes, expansión en
+>   dos etapas (`RRULE` y `CYCLE`), álgebra de intervalos y excepciones ancladas. 239 tests,
+>   **100 % de ramas**, con umbral obligatorio del 95 % por glob en el `vitest.config.ts` raíz.
+>   Su andamiaje (`PACKAGE_ID` y su test de humo) ya no existe.
+> - **Los otros seis paquetes siguen vacíos a propósito**: solo `PACKAGE_ID` y su test de humo,
+>   que se borran en la fase que dé contenido a cada uno.
+> - **Cuatro reglas de `dependency-cruiser` y un plugin GritQL de 24 formas**, todos vistos en
+>   rojo. Ver el límite nº1.
+>
+> **Siguiente: fase 2** — esquema y persistencia, dueño `db-architect`. No bloquea al motor.
 
 ---
 
